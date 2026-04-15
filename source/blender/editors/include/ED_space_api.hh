@@ -44,6 +44,7 @@ void ED_spacetype_clip();
 void ED_spacetype_project();
 void ED_spacetype_statusbar();
 void ED_spacetype_topbar();
+void ED_spacetype_usd_stage();
 
 namespace ed::vse {
 void ED_spacetype_sequencer();

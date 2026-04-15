@@ -87,6 +87,7 @@ void ED_spacetypes_init()
   ED_spacetype_statusbar();
   ED_spacetype_topbar();
   spreadsheet::register_spacetype();
+  ED_spacetype_usd_stage();
 
   /* Register operator types for screen and all spaces. */
   ED_operatortypes_userpref();

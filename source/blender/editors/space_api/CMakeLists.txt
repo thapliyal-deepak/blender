@@ -37,6 +37,7 @@ set(LIB
   bf_editor_space_sequencer
   bf_editor_space_spreadsheet
   bf_editor_space_statusbar
+  bf_editor_space_usd_stage
   bf_editor_space_text
   bf_editor_space_topbar
   bf_editor_space_userpref

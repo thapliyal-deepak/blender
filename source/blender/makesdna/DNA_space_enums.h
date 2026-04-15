@@ -1199,9 +1199,10 @@ enum eSpace_Type : char {
   SPACE_TOPBAR = 21,
   SPACE_STATUSBAR = 22,
   SPACE_SPREADSHEET = 23,
-  SPACE_PROJECT = 24
+  SPACE_PROJECT = 24,
+  SPACE_USD_STAGE = 25,
 
-#define SPACE_TYPE_NUM (SPACE_PROJECT + 1)
+#define SPACE_TYPE_NUM (SPACE_USD_STAGE + 1)
 };
 
 /* use for function args */

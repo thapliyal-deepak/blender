@@ -122,6 +122,23 @@ struct SpaceInfo {
   char _pad[7] = {};
 };
 
+/* -------------------------------------------------------------------- */
+/** \name USD Stage Editor (#SPACE_USD_STAGE)
+ * \{ */
+
+struct SpaceUsdStage {
+  SpaceLink *next = nullptr, *prev = nullptr;
+  ListBaseT<ARegion> regionbase = {nullptr, nullptr};
+  char spacetype = 0;
+  char link_flag = 0;
+  char _pad0[6] = {};
+  /* End 'SpaceLink' header. */
+
+  /** Path to the USD stage file currently open (empty = none). */
+  char filepath[1024] = {};
+  char _pad1[4] = {};
+};
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
