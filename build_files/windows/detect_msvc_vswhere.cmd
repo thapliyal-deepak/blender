@@ -85,15 +85,18 @@ if exist "%VCVARS%" (
 )
 
 rem Prebuilt libs in windows_x64 v5.1 require toolset 14.44.
-rem Prepend 14.44 bin dir so CMake finds the right cl.exe regardless of vcvarsall default.
-set "_CL44=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64"
-if exist "%_CL44%\cl.exe" (
+rem vcvarsall sets VCToolsInstallDir (used by CMake to locate cl.exe) to 14.38 by default.
+rem Override VCToolsInstallDir, VCToolsVersion, and PATH to force 14.44.
+set "_ROOT44=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207"
+if exist "%_ROOT44%\bin\Hostx64\x64\cl.exe" (
     echo Toolset override: using MSVC 14.44.35207
-    set "PATH=%_CL44%;%PATH%"
+    set "VCToolsInstallDir=%_ROOT44%\"
+    set "VCToolsVersion=14.44.35207"
+    set "PATH=%_ROOT44%\bin\Hostx64\x64;%PATH%"
 ) else (
-    echo WARNING: MSVC 14.44.35207 not found at %_CL44%
+    echo WARNING: MSVC 14.44.35207 not found at %_ROOT44%
 )
-set "_CL44="
+set "_ROOT44="
 
 rem try msbuild
 if NOT "%verbose%" == "" (
