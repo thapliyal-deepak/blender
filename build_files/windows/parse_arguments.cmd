@@ -21,6 +21,10 @@ if NOT "%1" == "" (
 			set BUILD_DIR_OVERRRIDE=%BLENDER_DIR%..\%2
 		)
 		shift /1
+	) else if "%1" == "libdir" (
+		REM Override LIBDIR to share prebuilt libs from another location.
+		set BUILD_CMAKE_ARGS=%BUILD_CMAKE_ARGS% -DLIBDIR="%~2"
+		shift /1
 	) else if "%1" == "with_tests" (
 		set TESTS_CMAKE_ARGS=%TESTS_CMAKE_ARGS% -DWITH_GTESTS=ON
 	) else if "%1" == "with_gpu_tests" (

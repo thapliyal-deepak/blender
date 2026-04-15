@@ -946,31 +946,19 @@ if(WITH_EMBREE)
   endif()
 endif()
 
-if(WITH_USD)
-  windows_find_package(USD)
-  if(NOT USD_FOUND)
-    # 3.5 22.03 libs
-    set(USD_INCLUDE_DIRS ${LIBDIR}/usd/include)
-    set(USD_RELEASE_LIB ${LIBDIR}/usd/lib/usd_usd_ms.lib)
-    set(USD_DEBUG_LIB ${LIBDIR}/usd/lib/usd_usd_ms_d.lib)
-    set(USD_LIBRARY_DIR ${LIBDIR}/usd/lib)
-    if(NOT EXISTS "${USD_RELEASE_LIB}") # 3.5 22.11 libs
-      set(USD_RELEASE_LIB ${LIBDIR}/usd/lib/usd_ms.lib)
-      set(USD_DEBUG_LIB ${LIBDIR}/usd/lib/usd_ms_d.lib)
-    endif()
-    # Older USD had different filenames, if the new ones are
-    # not found see if the older ones exist, to ease the
-    # transition period while landing libs.
-    if(NOT EXISTS "${USD_RELEASE_LIB}") # 3.3 static libs
-      set(USD_RELEASE_LIB ${LIBDIR}/usd/lib/usd_usd_m.lib)
-      set(USD_DEBUG_LIB ${LIBDIR}/usd/lib/usd_usd_m_d.lib)
-    endif()
-    set(USD_LIBRARIES
-      debug ${USD_DEBUG_LIB}
-      optimized ${USD_RELEASE_LIB}
-    )
-  endif()
+# Point CMake at Blender's bundled Python before find_package(PXR) so that
+# pxrConfig.cmake's internal find_package(Python3 EXACT x.y.z) resolves
+# against the correct version instead of any system-wide Python install.
+set(Python3_ROOT_DIR ${LIBDIR}/python/311)
+set(Python_FIND_REGISTRY NEVER)
+
+find_package(OpenGL REQUIRED)
+find_package(PXR REQUIRED)
+if(PXR_FOUND)
+  set(USD_INCLUDE_DIRS ${PXR_INCLUDE_DIRS})
+  set(USD_LIBRARIES optimized ${PXR_LIBRARIES})
 endif()
+message(STATUS "using pxr ${PXR_INCLUDE_DIRS}")
 
 if(WITH_MATERIALX)
   include("${LIBDIR}/MaterialX/lib/cmake/MaterialX/MaterialXTargets.cmake")
