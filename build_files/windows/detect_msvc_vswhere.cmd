@@ -73,12 +73,6 @@ if "%WITH_CLANG%" == "1" (
 
 set VCVARS=%VS_InstallDir%\VC\Auxiliary\Build\vcvarsall.bat
 if exist "%VCVARS%" (
-	REM Pin toolset 14.44.35207 (MSVC 19.44) so CMake does not fall back to 14.38.
-	REM VCToolsVersion is honoured by vcvarsall before it chooses a default.
-	if exist "%VS_InstallDir%\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe" (
-		set VCToolsVersion=14.44.35207
-		if NOT "%verbose%" == "" echo Pinning VCToolsVersion=14.44.35207
-	)
 	if NOT "%verbose%" == "" (
 		echo calling "%VCVARS%" %BUILD_ARCH%
 	)
