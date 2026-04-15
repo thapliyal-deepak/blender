@@ -39,9 +39,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang")
   endif()
 else()
   if(WITH_BLENDER)
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.38.0) # MSVC 2022 17.8+ (toolset 14.38+)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.44.35207) # MSVC 2022 17.14+ (toolset 14.44+)
       message(FATAL_ERROR
-        "Compiler is unsupported, MSVC 2022 17.8 or newer is required for building blender."
+        "Compiler is unsupported, MSVC 2022 17.14 or newer is required for building blender."
       )
     endif()
   endif()
