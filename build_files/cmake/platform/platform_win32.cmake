@@ -949,7 +949,7 @@ endif()
 # Point CMake at Blender's bundled Python before find_package(PXR) so that
 # pxrConfig.cmake's internal find_package(Python3 EXACT x.y.z) resolves
 # against the correct version instead of any system-wide Python install.
-set(Python3_ROOT_DIR ${LIBDIR}/python/311)
+set(Python3_ROOT_DIR ${LIBDIR}/python/313)
 set(Python_FIND_REGISTRY NEVER)
 
 find_package(OpenGL REQUIRED)
