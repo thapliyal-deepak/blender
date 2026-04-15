@@ -93,7 +93,7 @@ if exist "%_ROOT44%\bin\Hostx64\x64\cl.exe" (
     set "VCToolsInstallDir=%_ROOT44%\"
     set "VCToolsVersion=14.44.35207"
     set "PATH=%_ROOT44%\bin\Hostx64\x64;%PATH%"
-    set BUILD_CMAKE_ARGS=!BUILD_CMAKE_ARGS! -T "version=14.44"
+    set BUILD_CMAKE_ARGS=!BUILD_CMAKE_ARGS! -T "version=14.44.35207"
 ) else (
     echo WARNING: MSVC 14.44.35207 not found at %_ROOT44%
 )
