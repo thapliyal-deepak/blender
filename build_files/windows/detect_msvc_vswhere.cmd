@@ -85,14 +85,15 @@ if exist "%VCVARS%" (
 )
 
 rem Prebuilt libs in windows_x64 v5.1 require toolset 14.44.
-rem vcvarsall sets VCToolsInstallDir (used by CMake to locate cl.exe) to 14.38 by default.
-rem Override VCToolsInstallDir, VCToolsVersion, and PATH to force 14.44.
+rem For MSBuild generator CMake needs -T version=14.44 to select the toolset.
+rem For Ninja, VCToolsInstallDir and PATH are also overridden as a fallback.
 set "_ROOT44=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207"
 if exist "%_ROOT44%\bin\Hostx64\x64\cl.exe" (
     echo Toolset override: using MSVC 14.44.35207
     set "VCToolsInstallDir=%_ROOT44%\"
     set "VCToolsVersion=14.44.35207"
     set "PATH=%_ROOT44%\bin\Hostx64\x64;%PATH%"
+    set BUILD_CMAKE_ARGS=!BUILD_CMAKE_ARGS! -T "version=14.44"
 ) else (
     echo WARNING: MSVC 14.44.35207 not found at %_ROOT44%
 )
