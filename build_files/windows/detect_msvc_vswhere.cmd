@@ -84,6 +84,12 @@ if exist "%VCVARS%" (
 	goto FAIL
 )
 
+rem Prebuilt libs in windows_x64 v5.1 require toolset 14.44.
+rem Prepend 14.44 bin dir so CMake finds the right cl.exe regardless of vcvarsall default.
+set "_CL44=%VS_InstallDir%\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64"
+if exist "%_CL44%\cl.exe" set "PATH=%_CL44%;%PATH%"
+set "_CL44="
+
 rem try msbuild
 if NOT "%verbose%" == "" (
 	echo Testing for MSBuild 
