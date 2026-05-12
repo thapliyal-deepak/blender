@@ -262,6 +262,7 @@ enum eSpaceOutliner_Mode : short {
   SO_ID_ORPHANS = 14,
   SO_VIEW_LAYER = 15,
   SO_OVERRIDES_LIBRARY = 16,
+  SO_USD_STAGE = 17,
 };
 
 /** #SpaceOutliner.outlinevis */

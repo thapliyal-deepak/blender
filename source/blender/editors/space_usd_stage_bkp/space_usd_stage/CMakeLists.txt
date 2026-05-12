@@ -3,18 +3,14 @@ set(INC
   ../../blenkernel
   ../../blenlib
   ../../blentranslation
-  ../../bmesh
   ../../makesdna
   ../../makesrna
   ../../windowmanager
   ../../python/intern
-  ../../depsgraph
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
-  ../../io/usd/intern/usd_stage
 )
 
 set(INC_SYS
-  ${PYTHON_INCLUDE_DIR}
 )
 
 set(SRC
@@ -22,6 +18,7 @@ set(SRC
   usd_prim_tree_view.cc
   usd_stage_panels.cc
   usd_stage_runtime.cc
+
   space_usd_stage.hh
   usd_prim_tree_view.hh
   usd_stage_panels.hh
@@ -32,7 +29,6 @@ set(LIB
   PRIVATE bf::blenfont
   PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
-  PRIVATE bf::bmesh
   PRIVATE bf::dna
   PRIVATE bf::gpu
   PRIVATE bf::intern::guardedalloc

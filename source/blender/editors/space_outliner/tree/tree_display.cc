@@ -10,6 +10,10 @@
 
 #include "tree_display.hh"
 
+#ifdef WITH_USD
+#  include "tree_display_usd_stage.hh"
+#endif
+
 namespace blender {
 
 using namespace blender::ed::outliner;
@@ -40,6 +44,10 @@ std::unique_ptr<AbstractTreeDisplay> AbstractTreeDisplay::create_from_display_mo
       break;
     case SO_VIEW_LAYER:
       return std::make_unique<TreeDisplayViewLayer>(space_outliner);
+#ifdef WITH_USD
+    case SO_USD_STAGE:
+      return std::make_unique<TreeDisplayUsdStage>(space_outliner);
+#endif
   }
 
   BLI_assert_unreachable();

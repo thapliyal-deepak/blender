@@ -4,9 +4,10 @@
 
 #pragma once
 
+struct ARegionType;
+
 namespace blender {
 
-/* space_usd_stage.cc */
-void ED_spacetype_usd_stage();
+void usd_stage_panels_register(ARegionType *art);
 
 }  // namespace blender

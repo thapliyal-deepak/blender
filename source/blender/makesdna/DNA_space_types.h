@@ -126,6 +126,8 @@ struct SpaceInfo {
 /** \name USD Stage Editor (#SPACE_USD_STAGE)
  * \{ */
 
+struct SpaceUsdStage_Runtime;
+
 struct SpaceUsdStage {
   SpaceLink *next = nullptr, *prev = nullptr;
   ListBaseT<ARegion> regionbase = {nullptr, nullptr};
@@ -136,7 +138,14 @@ struct SpaceUsdStage {
 
   /** Path to the USD stage file currently open (empty = none). */
   char filepath[1024] = {};
-  char _pad1[4] = {};
+  /** SDF path of the currently selected prim (empty = none). */
+  char active_prim_path[1024] = {};
+  /** Attribute staged for inline editing in the sidebar (empty = none selected). */
+  char edit_attr_name[256] = {};
+  char edit_attr_value[512] = {};
+
+  /** Runtime data — not saved, not DNA. */
+  SpaceUsdStage_Runtime *runtime = nullptr;
 };
 
 /** \} */

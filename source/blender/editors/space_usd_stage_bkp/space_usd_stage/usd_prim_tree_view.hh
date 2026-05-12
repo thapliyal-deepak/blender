@@ -4,9 +4,13 @@
 
 #pragma once
 
+struct bContext;
+namespace blender::ui {
+struct Layout;
+}
+
 namespace blender {
 
-/* space_usd_stage.cc */
-void ED_spacetype_usd_stage();
+void usd_stage_prim_tree_draw(const bContext *C, blender::ui::Layout &layout);
 
 }  // namespace blender

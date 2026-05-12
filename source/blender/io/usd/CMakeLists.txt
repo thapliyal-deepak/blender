@@ -50,14 +50,25 @@ set(INC
   ../../makesrna
   ../../python/intern
   ../../../../intern/utfconv
+  ../../depsgraph
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
+  ${USD_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}/source/blender/editors/space_usd_stage
 )
+
+include_directories(${INC})
 
 set(INC_SYS
 )
 
 set(SRC
+  intern/usd_stage/usd_authoring_sync.cc
+  intern/usd_stage/usd_mesh_sync.cc
+  intern/usd_stage/usd_xform_sync.cc
+  intern/usd_stage/usd_notice_handler.cc
+  intern/usd_stage/usd_scene_sync.cc
+
   intern/usd_armature_utils.cc
   intern/usd_asset_utils.cc
   intern/usd_attribute_utils.cc
@@ -112,6 +123,13 @@ set(SRC
   usd_api_hook.hh
   usd_api_modifier.hh
   usd_private.hh
+
+  intern/usd_stage/usd_types_sync.hh
+  intern/usd_stage/usd_authoring_sync.hh
+  intern/usd_stage/usd_mesh_sync.hh
+  intern/usd_stage/usd_xform_sync.hh
+  intern/usd_stage/usd_notice_handler.hh
+  intern/usd_stage/usd_scene_sync.hh
 
   intern/usd_armature_utils.hh
   intern/usd_asset_utils.hh

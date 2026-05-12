@@ -389,6 +389,8 @@ class TOPBAR_MT_file_import(Menu):
         if bpy.app.build_options.usd:
             self.layout.operator(
                 "wm.usd_import", text="Universal Scene Description (.usd*)")
+            self.layout.operator(
+                "usd_stage.open", text="USD Stage Viewer (.usd*)")
 
         if bpy.app.build_options.io_gpencil:
             self.layout.operator("wm.grease_pencil_import_svg", text="SVG as Grease Pencil")

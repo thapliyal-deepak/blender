@@ -101,6 +101,7 @@ enum eTreeStoreElemType : short {
   TSE_ACTION_SLOT = 50,
   TSE_SHAPE_KEY_BLOCK = 51,
   TSE_SHAPE_KEY_BASE = 52,
+  TSE_USD_PRIM = 53, /* NO ID — create_data is a const char* prim path */
 };
 
 /** Check whether given #TreeStoreElem should have a real ID in #TreeStoreElem.id member. */
@@ -117,7 +118,8 @@ enum eTreeStoreElemType : short {
          TSE_RNA_ARRAY_ELEM, \
          TSE_ID_BASE, \
          TSE_GP_LAYER, \
-         TSE_GENERIC_LABEL))
+         TSE_GENERIC_LABEL, \
+         TSE_USD_PRIM))
 
 struct TreeStoreElem {
   eTreeStoreElemType type = TSE_SOME_ID;

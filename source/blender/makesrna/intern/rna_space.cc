@@ -189,6 +189,14 @@ const EnumPropertyItem rna_enum_space_type_items[] = {
      ICON_PROJECT,
      "Project Setup",
      "Manage the current Blender project"},
+
+    /* USD. */
+    RNA_ENUM_ITEM_HEADING(N_("USD"), nullptr),
+    {SPACE_USD_STAGE,
+     "USD_STAGE",
+     ICON_FILE_VOLUME,
+     "USD Stage",
+     "View and edit a USD stage prim hierarchy"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -830,7 +838,8 @@ static StructRNA *rna_Space_refine(PointerRNA *ptr)
     case SPACE_EMPTY:
     case SPACE_TOPBAR:
     case SPACE_STATUSBAR:
-      break;
+    case SPACE_USD_STAGE:
+      return RNA_SpaceUsdStage;
   }
 
   return RNA_Space;
@@ -4535,6 +4544,11 @@ static void rna_def_space_outliner(BlenderRNA *brna)
        ICON_LIBRARY_DATA_OVERRIDE,
        "Library Overrides",
        "Display data-blocks with library overrides and list their overridden properties"},
+      {SO_USD_STAGE,
+       "USD_STAGE",
+       ICON_FILE_3D,
+       "USD Stage",
+       "Display USD prim hierarchy from an open USD stage"},
       {SO_ID_ORPHANS,
        "ORPHAN_DATA",
        ICON_ORPHAN_DATA,
@@ -9754,6 +9768,33 @@ static void rna_def_space_project(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Active Section", "Choose the category of options to display");
 }
 
+static void rna_def_space_usd_stage(BlenderRNA *brna)
+{
+  StructRNA *srna;
+  PropertyRNA *prop;
+
+  srna = RNA_def_struct(brna, "SpaceUsdStage", "Space");
+  RNA_def_struct_sdna(srna, "SpaceUsdStage");
+  RNA_def_struct_ui_text(srna, "USD Stage Editor", "USD Stage Editor space data");
+
+  prop = RNA_def_string(srna,
+                        "edit_attr_name",
+                        nullptr,
+                        256,
+                        "Attribute Name",
+                        "Name of the attribute staged for inline editing");
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  prop = RNA_def_string(srna,
+                        "edit_attr_value",
+                        nullptr,
+                        512,
+                        "Attribute Value",
+                        "New value to write to the selected attribute");
+  RNA_def_property_flag(prop, PROP_TEXTEDIT_UPDATE);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+}
+
 void RNA_def_space(BlenderRNA *brna)
 {
   rna_def_space(brna);
@@ -9783,6 +9824,7 @@ void RNA_def_space(BlenderRNA *brna)
   rna_def_space_clip(brna);
   rna_def_space_spreadsheet(brna);
   rna_def_space_project(brna);
+  rna_def_space_usd_stage(brna);
 }
 
 }  // namespace blender

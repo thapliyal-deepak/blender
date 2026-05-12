@@ -93,6 +93,9 @@ if exist "%_ROOT44%\bin\Hostx64\x64\cl.exe" (
     set "VCToolsInstallDir=%_ROOT44%\"
     set "VCToolsVersion=14.44.35207"
     set "PATH=%_ROOT44%\bin\Hostx64\x64;%PATH%"
+    set "INCLUDE=%_ROOT44%\include;%_ROOT44%\ATLMFC\include;!INCLUDE!"
+    set "LIB=%_ROOT44%\lib\x64;%_ROOT44%\ATLMFC\lib\x64;!LIB!"
+    set "LIBPATH=%_ROOT44%\lib\x64;!LIBPATH!"
     set BUILD_CMAKE_ARGS=!BUILD_CMAKE_ARGS! "-DCMAKE_C_COMPILER=%_ROOT44%\bin\Hostx64\x64\cl.exe" "-DCMAKE_CXX_COMPILER=%_ROOT44%\bin\Hostx64\x64\cl.exe"
 ) else (
     echo WARNING: MSVC 14.44.35207 not found at %_ROOT44%
