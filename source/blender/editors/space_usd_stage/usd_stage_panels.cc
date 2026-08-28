@@ -199,7 +199,12 @@ static void usd_panel_layers_draw(const bContext *C, Panel *panel)
     /* ── Mute toggle (eye icon) ── */
     {
       const int eye_icon = layer.is_muted ? ICON_HIDE_ON : ICON_HIDE_OFF;
-      PointerRNA mute_ptr = row.op("USD_STAGE_OT_toggle_layer_mute", "", eye_icon);
+      /* The root layer cannot be muted — USD rejects muting a stage's own root layer, so the
+       * button only produced a coding error. Keep the column aligned by still drawing it, just
+       * greyed out and unclickable. */
+      ui::Layout &mute_sub = row.row(false);
+      mute_sub.enabled_set(!layer.is_root);
+      PointerRNA mute_ptr = mute_sub.op("USD_STAGE_OT_toggle_layer_mute", "", eye_icon);
       RNA_string_set(&mute_ptr, "layer_id", layer.identifier.c_str());
     }
 

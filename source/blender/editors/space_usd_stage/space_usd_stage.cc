@@ -923,6 +923,17 @@ static wmOperatorStatus usd_toggle_layer_mute_exec(bContext *C, wmOperator *op)
 
   const std::string layer_str(layer_id);
 
+  /* Pcp refuses to mute the layer a stage is rooted at (PcpCache::RequestLayerMuting emits
+   * "Cannot mute cache's root layer"), so the toggle would raise a coding error and then report
+   * success while nothing changed. The Layers panel greys the eye out for the root layer; this
+   * guard covers the operator being run from anywhere else. */
+  if (layer_str == suss->runtime->stage->GetRootLayer()->GetIdentifier()) {
+    BKE_report(op->reports,
+               RPT_ERROR,
+               "The root layer cannot be muted, it defines the stage. Mute a sublayer instead");
+    return OPERATOR_CANCELLED;
+  }
+
   const std::vector<std::string> &muted = suss->runtime->stage->GetMutedLayers();
   const bool currently_muted = std::find(muted.begin(), muted.end(), layer_str) != muted.end();
 
@@ -1683,14 +1694,12 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
       contributing.push_back(layer);
     }
   }
-  if (contributing.empty()) {
-    BKE_reportf(op->reports,
-                RPT_ERROR,
-                "'%s' has no opinions in the layers of this stage, it comes from a reference "
-                "or a payload",
-                prim_path);
-    return OPERATOR_CANCELLED;
-  }
+  /* A prim can perfectly well have no opinion of its own in the layer stack — anything brought
+   * in by a payload or a reference (which is most of a published asset) is like that. There is
+   * then nothing to move, but the useful half of this operator still applies: make a layer for
+   * the prim, sublayer it and point the edit target at it, so edits to it land somewhere of
+   * their own instead of in the root layer. */
+  const bool has_local_opinions = !contributing.empty();
 
   /* The new layer is written next to the root layer, so the stage has to live on disk. */
   const std::string root_path = root->GetRealPath();
@@ -1758,9 +1767,12 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
   /* When the prim has opinions in several layers, copying them one after the other would have
    * each copy overwrite the previous one. Flatten the layer stack and take the composed prim
    * from there instead, so the new layer reproduces what the stage shows right now. */
-  pxr::SdfLayerHandle source = contributing.front();
+  pxr::SdfLayerHandle source;
   pxr::SdfLayerRefPtr flattened;
-  if (contributing.size() > 1) {
+  if (contributing.size() == 1) {
+    source = contributing.front();
+  }
+  else if (contributing.size() > 1) {
     flattened = pxr::UsdUtilsFlattenLayerStack(stage);
     if (!flattened) {
       BKE_report(op->reports, RPT_ERROR, "Failed to flatten the layer stack");
@@ -1782,19 +1794,66 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
       /* Ancestors are created as overs; the new layer only takes ownership of the prim. */
       pxr::SdfJustCreatePrimInLayer(new_layer, parent_path);
     }
-    pxr::SdfCopySpec(source, path, new_layer, path);
 
-    for (const pxr::SdfLayerHandle &layer : contributing) {
-      usd_layer_remove_prim_spec(layer, path);
+    if (has_local_opinions) {
+      pxr::SdfCopySpec(source, path, new_layer, path);
+      for (const pxr::SdfLayerHandle &layer : contributing) {
+        usd_layer_remove_prim_spec(layer, path);
+      }
+    }
+    else {
+      /* Nothing to move, so just open the prim for editing in the new layer. */
+      pxr::SdfJustCreatePrimInLayer(new_layer, path);
     }
   }
 
-  /* Write the prim out straight away so the moved data is never held only in memory. The
-   * layers it came from are left dirty for the user to save, as everywhere else in this editor;
-   * until they do, the stage on disk simply still holds the old copy of the prim. */
+  /* Write the prim out straight away so the moved data is never held only in memory. */
   if (!new_layer->Save()) {
     BKE_reportf(op->reports, RPT_ERROR, "Failed to write layer: %s", filepath);
     return OPERATOR_CANCELLED;
+  }
+
+  /* Persist the layers this changed as well, rather than leaving them dirty the way the rest of
+   * this editor does. The new layer file is already committed to disk, so a half-saved result is
+   * not a neutral "save it yourself later": the sublayer entry and the prim removal live only in
+   * memory, and anything that drops them — reopening the stage, reloading a layer, quitting —
+   * leaves an orphan layer file sitting next to a stage that never referenced it. That is
+   * exactly what it looks like when this operator "does nothing". */
+  std::vector<pxr::SdfLayerHandle> to_save = contributing;
+  to_save.push_back(root);
+  std::vector<std::string> unsaved;
+  std::vector<std::string> seen_ids;
+  for (const pxr::SdfLayerHandle &layer : to_save) {
+    if (!layer || !layer->IsDirty()) {
+      continue;
+    }
+    /* `contributing` can already hold the root layer, so skip the repeat. */
+    const std::string id = layer->GetIdentifier();
+    if (std::find(seen_ids.begin(), seen_ids.end(), id) != seen_ids.end()) {
+      continue;
+    }
+    seen_ids.push_back(id);
+    if (layer->IsAnonymous()) {
+      /* No file to save to — Save Layer As is the way out, so say which one needs it. */
+      unsaved.push_back(layer->GetDisplayName());
+      continue;
+    }
+    if (!layer->Save()) {
+      unsaved.push_back(layer->GetDisplayName());
+    }
+  }
+  if (!unsaved.empty()) {
+    std::string names;
+    for (const std::string &name : unsaved) {
+      if (!names.empty()) {
+        names += ", ";
+      }
+      names += name;
+    }
+    BKE_reportf(op->reports,
+                RPT_WARNING,
+                "Moved the prim, but these layers still hold unsaved changes: %s",
+                names.c_str());
   }
 
   stage->SetEditTarget(new_layer);
@@ -1804,11 +1863,17 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
   suss->runtime->refresh_prim_detail(prim_path);
 
   WM_event_add_notifier(C, NC_SPACE, nullptr);
-  BKE_reportf(op->reports,
-              RPT_INFO,
-              "Moved '%s' to %s. Save the stage to update the layers it came from",
-              prim_path,
-              filepath);
+  if (has_local_opinions) {
+    BKE_reportf(op->reports, RPT_INFO, "Moved '%s' to %s", prim_path, filepath);
+  }
+  else {
+    BKE_reportf(op->reports,
+                RPT_INFO,
+                "'%s' comes from a reference or a payload, so nothing was moved. %s is now the "
+                "edit target for it",
+                prim_path,
+                filepath);
+  }
   return OPERATOR_FINISHED;
 }
 

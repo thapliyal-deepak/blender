@@ -134,6 +134,19 @@ void sync_xform_push(blender::Object *ob, pxr::UsdPrim prim)
   for (pxr::UsdGeomXformOp &op : xf.GetOrderedXformOps(&reset_stack)) {
     using Type = pxr::UsdGeomXformOp::Type;
     const Type t = op.GetOpType();
+
+    /* Leave inverse ops ("!invert!xformOp:translate:pivot") and namespaced ops
+     * ("xformOp:translate:pivot") alone. UsdGeomXformOp::Set() refuses an inverse op outright,
+     * and a suffixed op is a pivot offset rather than the prim's placement, so writing the
+     * object position into it would move the mesh. Houdini assets carry a pivot pair as a
+     * matter of course, and picking either one up here made every push fail with
+     * "Cannot set a value on the inverse xformOp" while orient and scale were still authored,
+     * leaving a half-written op stack behind. The ops we do want are unnamespaced:
+     * "xformOp:translate" splits into two parts, "xformOp:translate:pivot" into three. */
+    if (op.IsInverseOp() || op.SplitName().size() > 2) {
+      continue;
+    }
+
     if (t == Type::TypeTranslate) {
       translate_op = op;
       found_translate = true;
@@ -189,6 +202,30 @@ void sync_xform_push(blender::Object *ob, pxr::UsdPrim prim)
     rotate_op = xf.AddOrientOp();
   if (!found_scale)
     scale_op = xf.AddScaleOp();
+
+  if (!found_translate || !found_rotate || !found_scale) {
+    /* AddXformOp() appends to xformOpOrder, and the *end* of that array is the most LOCAL op
+     * (see UsdGeomXformable's docs: the order is the reverse of matrix-algebra order). A
+     * translate appended there would be rotated and scaled by the ops ahead of it. Author the
+     * order instead, with our three ops first — most global — in the canonical
+     * translate/orient/scale sequence that the rest of this file's decomposition assumes, and
+     * every other op (a pivot pair, say) kept in place behind them. When all three ops were
+     * already present the order is left exactly as authored. */
+    const pxr::TfToken ours[3] = {
+        translate_op.GetOpName(), rotate_op.GetOpName(), scale_op.GetOpName()};
+    pxr::VtTokenArray cur_order;
+    xf.GetXformOpOrderAttr().Get(&cur_order);
+    pxr::VtTokenArray fixed_order;
+    for (const pxr::TfToken &tok : ours) {
+      fixed_order.push_back(tok);
+    }
+    for (const pxr::TfToken &tok : cur_order) {
+      if (tok != ours[0] && tok != ours[1] && tok != ours[2]) {
+        fixed_order.push_back(tok);
+      }
+    }
+    xf.CreateXformOpOrderAttr(pxr::VtValue(fixed_order));
+  }
 
   translate_op.Set(t_vec);
   rotate_op.Set(pxr::GfQuatf(r_quat));
