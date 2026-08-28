@@ -95,6 +95,52 @@ static const pxr::TfToken UsdUVTexture("UsdUVTexture", pxr::TfToken::Immortal);
 static const pxr::TfToken UsdTransform2d("UsdTransform2d", pxr::TfToken::Immortal);
 }  // namespace usdtokens
 
+namespace mtlxtokens {
+
+/* MaterialX "mtlx" render context and Autodesk standard_surface shader/parameter names.
+ * These let the importer read materials that only author the MaterialX render context
+ * (e.g. AMD GPUOpen assets, or USD written by DCCs without a UsdPreviewSurface). */
+static const pxr::TfToken mtlx("mtlx", pxr::TfToken::Immortal);
+static const pxr::TfToken standard_surface("ND_standard_surface_surfaceshader",
+                                           pxr::TfToken::Immortal);
+static const pxr::TfToken open_pbr_surface("ND_open_pbr_surface_surfaceshader",
+                                           pxr::TfToken::Immortal);
+static const pxr::TfToken gltf_pbr("ND_gltf_pbr_surfaceshader", pxr::TfToken::Immortal);
+static const pxr::TfToken base_color("base_color", pxr::TfToken::Immortal);
+static const pxr::TfToken metalness("metalness", pxr::TfToken::Immortal);
+static const pxr::TfToken specular_roughness("specular_roughness", pxr::TfToken::Immortal);
+static const pxr::TfToken specular_IOR("specular_IOR", pxr::TfToken::Immortal);
+static const pxr::TfToken specular_color("specular_color", pxr::TfToken::Immortal);
+static const pxr::TfToken coat("coat", pxr::TfToken::Immortal);
+static const pxr::TfToken coat_roughness("coat_roughness", pxr::TfToken::Immortal);
+static const pxr::TfToken coat_IOR("coat_IOR", pxr::TfToken::Immortal);
+static const pxr::TfToken coat_color("coat_color", pxr::TfToken::Immortal);
+static const pxr::TfToken transmission("transmission", pxr::TfToken::Immortal);
+static const pxr::TfToken subsurface("subsurface", pxr::TfToken::Immortal);
+static const pxr::TfToken subsurface_scale("subsurface_scale", pxr::TfToken::Immortal);
+static const pxr::TfToken subsurface_radius("subsurface_radius", pxr::TfToken::Immortal);
+static const pxr::TfToken subsurface_anisotropy("subsurface_anisotropy", pxr::TfToken::Immortal);
+static const pxr::TfToken sheen("sheen", pxr::TfToken::Immortal);
+static const pxr::TfToken sheen_roughness("sheen_roughness", pxr::TfToken::Immortal);
+static const pxr::TfToken sheen_color("sheen_color", pxr::TfToken::Immortal);
+static const pxr::TfToken emission("emission", pxr::TfToken::Immortal);
+static const pxr::TfToken emission_color("emission_color", pxr::TfToken::Immortal);
+static const pxr::TfToken diffuse_roughness("diffuse_roughness", pxr::TfToken::Immortal);
+static const pxr::TfToken thin_film_thickness("thin_film_thickness", pxr::TfToken::Immortal);
+static const pxr::TfToken thin_film_IOR("thin_film_IOR", pxr::TfToken::Immortal);
+static const pxr::TfToken normal("normal", pxr::TfToken::Immortal);
+static const pxr::TfToken index("index", pxr::TfToken::Immortal);
+/* Node-graph plumbing: MaterialX standard-library input names used when following
+ * connections through texcoord / multiply / mix / constant nodes. */
+static const pxr::TfToken texcoord("texcoord", pxr::TfToken::Immortal);
+static const pxr::TfToken in1("in1", pxr::TfToken::Immortal);
+static const pxr::TfToken in2("in2", pxr::TfToken::Immortal);
+static const pxr::TfToken fg("fg", pxr::TfToken::Immortal);
+static const pxr::TfToken bg("bg", pxr::TfToken::Immortal);
+static const pxr::TfToken mix("mix", pxr::TfToken::Immortal);
+static const pxr::TfToken value("value", pxr::TfToken::Immortal);
+}  // namespace mtlxtokens
+
 using io::usd::ShaderToNodeMap;
 
 /* Add a node of the given type at the given location coordinates. */
@@ -351,6 +397,86 @@ static void set_viewport_material_props(Material *mtl, const pxr::UsdShadeShader
   }
 }
 
+/* Attempts to return in r_surface a supported MaterialX surface shader source of the
+ * given material, resolved through the "mtlx" render context.  Supports the Autodesk
+ * standard_surface, OpenPBR (open_pbr_surface) and glTF PBR (gltf_pbr) shading models.
+ * Returns true if such a source was found and returns false otherwise. */
+static bool get_mtlx_standard_surface(const pxr::UsdShadeMaterial &usd_material,
+                                      pxr::UsdShadeShader &r_surface)
+{
+  if (!usd_material) {
+    return false;
+  }
+
+  if (pxr::UsdShadeShader surf_shader = usd_material.ComputeSurfaceSource(mtlxtokens::mtlx)) {
+    pxr::TfToken shader_id;
+    if (surf_shader.GetShaderId(&shader_id) &&
+        (shader_id == mtlxtokens::standard_surface ||
+         shader_id == mtlxtokens::open_pbr_surface || shader_id == mtlxtokens::gltf_pbr))
+    {
+      r_surface = surf_shader;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* Set the Blender material's viewport display color, metallic and roughness properties
+ * from the given MaterialX standard_surface shader's inputs (Workbench display). */
+static void set_viewport_material_props_mtlx(Material *mtl, const pxr::UsdShadeShader &surf)
+{
+  if (!(mtl && surf)) {
+    return;
+  }
+
+  /* Return the first input present under any of the candidate names.  standard_surface,
+   * OpenPBR and glTF PBR name their base metalness/roughness inputs differently. */
+  auto first_input = [&](std::initializer_list<const char *> names) -> pxr::UsdShadeInput {
+    for (const char *n : names) {
+      if (pxr::UsdShadeInput in = surf.GetInput(pxr::TfToken(n))) {
+        return in;
+      }
+    }
+    return pxr::UsdShadeInput();
+  };
+
+  if (pxr::UsdShadeInput base_color_input = first_input({"base_color"})) {
+    const pxr::UsdShadeAttributeVector attrs = base_color_input.GetValueProducingAttributes();
+    if (!attrs.empty()) {
+      pxr::VtValue val;
+      if (attrs[0].Get(&val) && val.IsHolding<pxr::GfVec3f>()) {
+        pxr::GfVec3f color = val.UncheckedGet<pxr::GfVec3f>();
+        io::usd::colorspace_attr_to_scene_linear(attrs[0], color);
+        mtl->r = color[0];
+        mtl->g = color[1];
+        mtl->b = color[2];
+      }
+    }
+  }
+
+  if (pxr::UsdShadeInput metalness_input = first_input({"metalness", "base_metalness", "metallic"}))
+  {
+    const pxr::UsdShadeAttributeVector attrs = metalness_input.GetValueProducingAttributes();
+    if (!attrs.empty()) {
+      pxr::VtValue val;
+      if (attrs[0].Get(&val) && val.IsHolding<float>()) {
+        mtl->metallic = val.UncheckedGet<float>();
+      }
+    }
+  }
+
+  if (pxr::UsdShadeInput roughness_input = first_input({"specular_roughness", "roughness"})) {
+    const pxr::UsdShadeAttributeVector attrs = roughness_input.GetValueProducingAttributes();
+    if (!attrs.empty()) {
+      pxr::VtValue val;
+      if (attrs[0].Get(&val) && val.IsHolding<float>()) {
+        mtl->roughness = val.UncheckedGet<float>();
+      }
+    }
+  }
+}
+
 static pxr::UsdShadeInput get_input(const pxr::UsdShadeShader &usd_shader,
                                     const pxr::TfToken &input_name)
 {
@@ -470,9 +596,25 @@ Material *USDMaterialReader::add_material(const pxr::UsdShadeMaterial &usd_mater
 void USDMaterialReader::import_usd_preview(Material *mtl,
                                            const pxr::UsdShadeMaterial &usd_material) const
 {
+  pxr::UsdShadeShader usd_preview;
+  pxr::UsdShadeShader mtlx_surface;
+
+  /* When asked to prefer MaterialX (e.g. reopening a stage bound in the USD Stage Editor, which
+   * authors both a MaterialX reference and a lossy UsdPreviewSurface for non-MaterialX renderers),
+   * read the MaterialX network first — it is the faithful source. Only fall back to
+   * UsdPreviewSurface when the material has no MaterialX surface. */
+  if (params_.prefer_mtlx_over_preview && get_mtlx_standard_surface(usd_material, mtlx_surface)) {
+
+    set_viewport_material_props_mtlx(mtl, mtlx_surface);
+
+    if (params_.import_usd_preview) {
+      import_mtlx_nodes(mtl, usd_material, mtlx_surface);
+    }
+    return;
+  }
+
   /* Get the UsdPreviewSurface shader source for the material,
    * if there is one. */
-  pxr::UsdShadeShader usd_preview;
   if (get_usd_preview_surface(usd_material, usd_preview)) {
 
     set_viewport_material_props(mtl, usd_preview);
@@ -480,6 +622,19 @@ void USDMaterialReader::import_usd_preview(Material *mtl,
     /* Optionally, create shader nodes to represent a UsdPreviewSurface. */
     if (params_.import_usd_preview) {
       import_usd_preview_nodes(mtl, usd_material, usd_preview);
+    }
+    return;
+  }
+
+  /* No UsdPreviewSurface source.  Fall back to a MaterialX standard_surface source
+   * (resolved through the "mtlx" render context) so materials authored only for
+   * MaterialX renderers still import as a Principled BSDF approximation. */
+  if (get_mtlx_standard_surface(usd_material, mtlx_surface)) {
+
+    set_viewport_material_props_mtlx(mtl, mtlx_surface);
+
+    if (params_.import_usd_preview) {
+      import_mtlx_nodes(mtl, usd_material, mtlx_surface);
     }
   }
 }
@@ -620,6 +775,147 @@ void USDMaterialReader::set_principled_node_inputs(bNode *principled,
   }
 }
 
+void USDMaterialReader::import_mtlx_nodes(Material *mtl,
+                                          const pxr::UsdShadeMaterial & /*usd_material*/,
+                                          const pxr::UsdShadeShader &usd_shader) const
+{
+  if (!(mtl && usd_shader)) {
+    return;
+  }
+
+  /* Create the Material's node tree containing the Principled BSDF and output shaders. */
+  bNodeTree *ntree = mtl->nodetree;
+  BLI_assert(ntree != nullptr);
+
+  bNode *principled = add_node(ntree, SH_NODE_BSDF_PRINCIPLED, {0.0f, 300.0f});
+  bNode *output = add_node(ntree, SH_NODE_OUTPUT_MATERIAL, {300.0f, 300.0f});
+  link_nodes(ntree, principled, "BSDF", output, "Surface");
+
+  set_principled_node_inputs_mtlx(principled, ntree, usd_shader);
+
+  bke::node_set_active(*ntree, *output);
+  BKE_ntree_update_after_single_tree_change(bmain_, *ntree);
+}
+
+void USDMaterialReader::set_principled_node_inputs_mtlx(bNode *principled,
+                                                        bNodeTree *ntree,
+                                                        const pxr::UsdShadeShader &usd_shader) const
+{
+  NodePlacementContext context(0.0f, 300.0f);
+  const int column = 0;
+
+  /* MaterialX surface input -> Principled BSDF socket.  Socket names verified against
+   * node_shader_bsdf_principled.cc.  Connected inputs are followed via
+   * set_node_input()/follow_connection().  Destination sockets not present on the Principled
+   * node are skipped gracefully by set_node_input(). */
+  struct MtlxMapping {
+    const char *input;
+    const char *socket;
+    bool color_corrected;
+  };
+
+  /* Autodesk standard_surface. */
+  static const MtlxMapping standard_surface_map[] = {
+      {"base_color", "Base Color", true},
+      {"metalness", "Metallic", false},
+      {"specular_roughness", "Roughness", false},
+      {"specular_IOR", "IOR", false},
+      {"specular_color", "Specular Tint", false},
+      {"coat", "Coat Weight", false},
+      {"coat_roughness", "Coat Roughness", false},
+      {"coat_IOR", "Coat IOR", false},
+      {"coat_color", "Coat Tint", false},
+      {"transmission", "Transmission Weight", false},
+      {"subsurface", "Subsurface Weight", false},
+      {"subsurface_scale", "Subsurface Scale", false},
+      {"subsurface_radius", "Subsurface Radius", false},
+      {"subsurface_anisotropy", "Subsurface Anisotropy", false},
+      {"sheen", "Sheen Weight", false},
+      {"sheen_roughness", "Sheen Roughness", false},
+      {"sheen_color", "Sheen Tint", false},
+      {"emission", "Emission Strength", false},
+      {"emission_color", "Emission Color", true},
+      {"diffuse_roughness", "Diffuse Roughness", false},
+      {"thin_film_thickness", "Thin Film Thickness", false},
+      {"thin_film_IOR", "Thin Film IOR", false},
+      {"normal", "Normal", false},
+  };
+
+  /* OpenPBR (open_pbr_surface).  Input names per the ND_open_pbr_surface_surfaceshader
+   * nodedef.  Approximate mapping — OpenPBR is richer than the Principled BSDF. */
+  static const MtlxMapping open_pbr_map[] = {
+      {"base_color", "Base Color", true},
+      {"base_metalness", "Metallic", false},
+      {"base_diffuse_roughness", "Diffuse Roughness", false},
+      {"specular_roughness", "Roughness", false},
+      {"specular_ior", "IOR", false},
+      {"specular_color", "Specular Tint", true},
+      {"transmission_weight", "Transmission Weight", false},
+      {"subsurface_weight", "Subsurface Weight", false},
+      {"subsurface_radius", "Subsurface Radius", false},
+      {"coat_weight", "Coat Weight", false},
+      {"coat_roughness", "Coat Roughness", false},
+      {"coat_color", "Coat Tint", true},
+      {"coat_ior", "Coat IOR", false},
+      {"fuzz_weight", "Sheen Weight", false},
+      {"fuzz_roughness", "Sheen Roughness", false},
+      {"fuzz_color", "Sheen Tint", true},
+      {"emission_color", "Emission Color", true},
+      {"emission_luminance", "Emission Strength", false},
+      {"geometry_normal", "Normal", false},
+      {"geometry_opacity", "Alpha", false},
+      {"thin_film_thickness", "Thin Film Thickness", false},
+      {"thin_film_ior", "Thin Film IOR", false},
+  };
+
+  /* glTF PBR (gltf_pbr).  Input names per the ND_gltf_pbr_surfaceshader nodedef. */
+  static const MtlxMapping gltf_pbr_map[] = {
+      {"base_color", "Base Color", true},
+      {"metallic", "Metallic", false},
+      {"roughness", "Roughness", false},
+      {"normal", "Normal", false},
+      {"ior", "IOR", false},
+      {"specular", "Specular IOR Level", false},
+      {"specular_color", "Specular Tint", true},
+      {"transmission", "Transmission Weight", false},
+      {"sheen_color", "Sheen Tint", true},
+      {"sheen_roughness", "Sheen Roughness", false},
+      {"clearcoat", "Coat Weight", false},
+      {"clearcoat_roughness", "Coat Roughness", false},
+      {"clearcoat_normal", "Coat Normal", false},
+      {"emissive", "Emission Color", true},
+      {"emissive_strength", "Emission Strength", false},
+      {"alpha", "Alpha", false},
+      {"iridescence_thickness", "Thin Film Thickness", false},
+      {"iridescence_ior", "Thin Film IOR", false},
+  };
+
+  pxr::TfToken shader_id;
+  usd_shader.GetShaderId(&shader_id);
+
+  const MtlxMapping *table = standard_surface_map;
+  size_t table_size = sizeof(standard_surface_map) / sizeof(standard_surface_map[0]);
+  if (shader_id == mtlxtokens::open_pbr_surface) {
+    table = open_pbr_map;
+    table_size = sizeof(open_pbr_map) / sizeof(open_pbr_map[0]);
+  }
+  else if (shader_id == mtlxtokens::gltf_pbr) {
+    table = gltf_pbr_map;
+    table_size = sizeof(gltf_pbr_map) / sizeof(gltf_pbr_map[0]);
+  }
+
+  for (size_t i = 0; i < table_size; i++) {
+    const MtlxMapping &m = table[i];
+    pxr::UsdShadeInput input = usd_shader.GetInput(pxr::TfToken(m.input));
+    if (!input) {
+      continue;
+    }
+    ExtraLinkInfo extra;
+    extra.is_color_corrected = m.color_corrected;
+    set_node_input(input, principled, m.socket, ntree, column, context, extra);
+  }
+}
+
 bool USDMaterialReader::set_displacement_node_inputs(bNodeTree *ntree,
                                                      bNode *output,
                                                      const pxr::UsdShadeShader &usd_shader) const
@@ -734,6 +1030,13 @@ bool USDMaterialReader::set_node_input(const pxr::UsdShadeInput &usd_input,
       else if (val.IsHolding<pxr::GfVec2f>()) {
         pxr::GfVec2f v2f = val.UncheckedGet<pxr::GfVec2f>();
         copy_v2_v2(sock->default_value_typed<bNodeSocketValueVector>()->value, v2f.data());
+        return true;
+      }
+      else if (val.IsHolding<float>()) {
+        /* Broadcast a scalar onto all vector components (e.g. a MaterialX ND_constant_float
+         * feeding a uniform UV scale into a Vector Math node). */
+        copy_v3_fl(sock->default_value_typed<bNodeSocketValueVector>()->value,
+                   val.UncheckedGet<float>());
         return true;
       }
       break;
@@ -976,6 +1279,23 @@ static pxr::UsdShadeShader node_graph_output_source(const pxr::UsdShadeNodeGraph
   return shader;
 }
 
+/* Create a Separate Color node and select the output channel (0=Red, 1=Green, 2=Blue)
+ * corresponding to a MaterialX 'extract' node's index input. */
+static IntermediateNode add_separate_color_index(bNodeTree *ntree,
+                                                 int index,
+                                                 int column,
+                                                 NodePlacementContext &ctx)
+{
+  const float2 loc = ctx.compute_node_loc(column);
+
+  IntermediateNode separate_color{};
+  separate_color.node = add_node(ntree, SH_NODE_SEPARATE_COLOR, loc);
+  separate_color.sock_input_name = "Color";
+  separate_color.sock_output_name = index <= 0 ? "Red" : (index == 1 ? "Green" : "Blue");
+
+  return separate_color;
+}
+
 bool USDMaterialReader::follow_connection(const pxr::UsdShadeInput &usd_input,
                                           bNode *dest_node,
                                           const StringRefNull dest_socket_name,
@@ -1159,6 +1479,69 @@ bool USDMaterialReader::follow_connection(const pxr::UsdShadeInput &usd_input,
   else if (shader_id == usdtokens::UsdTransform2d) {
     convert_usd_transform_2d(source_shader, dest_node, dest_socket_name, ntree, column + 1, ctx);
   }
+  else if (StringRef(shader_id.GetString()).startswith("ND_image_") ||
+           StringRef(shader_id.GetString()).startswith("ND_tiledimage_"))
+  {
+    /* MaterialX image node -> Blender Image Texture. */
+    convert_mtlx_image(source_shader, dest_node, dest_socket_name, ntree, column + 1, ctx, extra);
+  }
+  else if (StringRef(shader_id.GetString()).startswith("ND_normalmap")) {
+    /* MaterialX normalmap node -> Normal Map node feeding from the connected image. */
+    IntermediateNode normal_map = add_normal_map(ntree, column + 1, ctx);
+    link_nodes(ntree, normal_map.node, normal_map.sock_output_name, dest_node, dest_socket_name);
+    if (pxr::UsdShadeInput in_input = source_shader.GetInput(usdtokens::in)) {
+      /* Normal maps are raw data; leave is_color_corrected false so the image is Non-Color. */
+      set_node_input(
+          in_input, normal_map.node, normal_map.sock_input_name, ntree, column + 2, ctx);
+    }
+  }
+  else if (StringRef(shader_id.GetString()).startswith("ND_extract_")) {
+    /* MaterialX extract node -> Separate Color, picking the channel by 'index'
+     * (this is how packed ORM textures drive Roughness/Metalness/Occlusion). */
+    int index = 0;
+    if (pxr::UsdShadeInput idx_input = source_shader.GetInput(mtlxtokens::index)) {
+      pxr::VtValue v;
+      if (idx_input.Get(&v) && v.IsHolding<int>()) {
+        index = v.UncheckedGet<int>();
+      }
+    }
+    IntermediateNode separate_color = add_separate_color_index(ntree, index, column + 1, ctx);
+    link_nodes(
+        ntree, separate_color.node, separate_color.sock_output_name, dest_node, dest_socket_name);
+    if (pxr::UsdShadeInput in_input = source_shader.GetInput(usdtokens::in)) {
+      set_node_input(in_input,
+                     separate_color.node,
+                     separate_color.sock_input_name,
+                     ntree,
+                     column + 2,
+                     ctx);
+    }
+  }
+  else if (StringRef(shader_id.GetString()).startswith("ND_texcoord")) {
+    /* MaterialX texcoord node -> Texture Coordinate node (UV output). */
+    convert_mtlx_texcoord(source_shader, dest_node, dest_socket_name, ntree, column + 1, ctx);
+  }
+  else if (StringRef(shader_id.GetString()).startswith("ND_multiply") ||
+           StringRef(shader_id.GetString()).startswith("ND_add") ||
+           StringRef(shader_id.GetString()).startswith("ND_subtract") ||
+           StringRef(shader_id.GetString()).startswith("ND_divide"))
+  {
+    /* MaterialX arithmetic node -> Vector Math / Math node (e.g. UV scale is texcoord *
+     * scalar).  Node kind is chosen from the destination socket type. */
+    convert_mtlx_binary_op(
+        source_shader, shader_id, dest_node, dest_socket_name, ntree, column + 1, ctx, extra);
+  }
+  else if (StringRef(shader_id.GetString()).startswith("ND_mix")) {
+    /* MaterialX mix node -> Map Range (lerp).  Used e.g. to remap a packed ORM channel
+     * into a [min,max] roughness range. */
+    convert_mtlx_mix(source_shader, dest_node, dest_socket_name, ntree, column + 1, ctx, extra);
+  }
+  else if (StringRef(shader_id.GetString()).startswith("ND_constant")) {
+    /* MaterialX constant node -> set the destination socket's default from its value. */
+    if (pxr::UsdShadeInput val_input = source_shader.GetInput(mtlxtokens::value)) {
+      set_node_input(val_input, dest_node, dest_socket_name, ntree, column, ctx, extra);
+    }
+  }
   else {
     /* Handle any remaining "generic" primvar readers. */
     StringRef shader_id_name(shader_id.GetString());
@@ -1213,6 +1596,183 @@ void USDMaterialReader::convert_usd_uv_texture(const pxr::UsdShadeShader &usd_sh
   /* Connect the texture image node "Vector" input. */
   if (pxr::UsdShadeInput st_input = usd_shader.GetInput(usdtokens::st)) {
     set_node_input(st_input, tex_image, "Vector", ntree, column, ctx);
+  }
+}
+
+void USDMaterialReader::convert_mtlx_image(const pxr::UsdShadeShader &usd_shader,
+                                           bNode *dest_node,
+                                           const StringRefNull dest_socket_name,
+                                           bNodeTree *ntree,
+                                           const int column,
+                                           NodePlacementContext &ctx,
+                                           const ExtraLinkInfo &extra) const
+{
+  if (!usd_shader || !dest_node || !ntree || dest_socket_name.is_empty()) {
+    return;
+  }
+
+  bNode *tex_image = ctx.get_cached_node(usd_shader);
+
+  if (tex_image == nullptr) {
+    const float2 loc = ctx.compute_node_loc(column);
+
+    /* Create the Texture Image node. */
+    tex_image = add_node(ntree, SH_NODE_TEX_IMAGE, loc);
+
+    /* Cache newly created node. */
+    ctx.cache_node(usd_shader, tex_image);
+
+    /* Load the texture image.  load_tex_image() reads the shader's "file" input and applies
+     * colorspace from the file input's metadata (MaterialX authors "srgb_texture" on color
+     * images), falling back to Non-Color for data textures (extra.is_color_corrected == false). */
+    load_tex_image(usd_shader, tex_image, extra);
+
+    /* Follow the MaterialX "texcoord" input (UV coordinates, optionally scaled/offset) into
+     * the Image Texture's "Vector" input.  Only when a source is connected — an unconnected
+     * texcoord means the default UV set, which Blender's Image Texture already uses. */
+    if (pxr::UsdShadeInput tc_input = usd_shader.GetInput(mtlxtokens::texcoord)) {
+      if (tc_input.HasConnectedSource()) {
+        /* UV data is never colour-managed. */
+        set_node_input(tc_input, tex_image, "Vector", ntree, column + 1, ctx, ExtraLinkInfo{});
+      }
+    }
+  }
+
+  /* MaterialX image outputs are single-output ("out"); wire the Color output to the
+   * destination.  Float/vector destinations accept the implicit conversion. */
+  link_nodes(ntree, tex_image, "Color", dest_node, dest_socket_name);
+}
+
+void USDMaterialReader::convert_mtlx_texcoord(const pxr::UsdShadeShader &usd_shader,
+                                              bNode *dest_node,
+                                              const StringRefNull dest_socket_name,
+                                              bNodeTree *ntree,
+                                              const int column,
+                                              NodePlacementContext &ctx) const
+{
+  if (!usd_shader || !dest_node || !ntree || dest_socket_name.is_empty()) {
+    return;
+  }
+
+  bNode *tex_coord = ctx.get_cached_node(usd_shader);
+  if (tex_coord == nullptr) {
+    tex_coord = add_node(ntree, SH_NODE_TEX_COORD, ctx.compute_node_loc(column));
+    ctx.cache_node(usd_shader, tex_coord);
+  }
+
+  /* MaterialX texcoord provides UV coordinates; use the Texture Coordinate node's UV output. */
+  link_nodes(ntree, tex_coord, "UV", dest_node, dest_socket_name);
+}
+
+void USDMaterialReader::convert_mtlx_binary_op(const pxr::UsdShadeShader &usd_shader,
+                                               const pxr::TfToken &shader_id,
+                                               bNode *dest_node,
+                                               const StringRefNull dest_socket_name,
+                                               bNodeTree *ntree,
+                                               const int column,
+                                               NodePlacementContext &ctx,
+                                               const ExtraLinkInfo &extra) const
+{
+  if (!usd_shader || !dest_node || !ntree || dest_socket_name.is_empty()) {
+    return;
+  }
+
+  const StringRef id(shader_id.GetString());
+
+  /* Pick a Vector Math or (scalar) Math node based on what the destination socket expects. */
+  bNodeSocket *dsock = bke::node_find_socket(*dest_node, SOCK_IN, UString(dest_socket_name));
+  const bool is_vector = dsock && (dsock->type == SOCK_VECTOR || dsock->type == SOCK_RGBA);
+
+  bNode *node = ctx.get_cached_node(usd_shader);
+  const bool fresh = (node == nullptr);
+
+  StringRefNull out_name, in1_name, in2_name;
+  if (is_vector) {
+    if (fresh) {
+      node = add_node(ntree, SH_NODE_VECTOR_MATH, ctx.compute_node_loc(column));
+      node->custom1 = id.startswith("ND_add")      ? NODE_VECTOR_MATH_ADD :
+                      id.startswith("ND_subtract") ? NODE_VECTOR_MATH_SUBTRACT :
+                      id.startswith("ND_divide")   ? NODE_VECTOR_MATH_DIVIDE :
+                                                     NODE_VECTOR_MATH_MULTIPLY;
+      ctx.cache_node(usd_shader, node);
+    }
+    out_name = "Vector";
+    in1_name = "Vector";
+    in2_name = "Vector_001";
+  }
+  else {
+    if (fresh) {
+      node = add_node(ntree, SH_NODE_MATH, ctx.compute_node_loc(column));
+      node->custom1 = id.startswith("ND_add")      ? NODE_MATH_ADD :
+                      id.startswith("ND_subtract") ? NODE_MATH_SUBTRACT :
+                      id.startswith("ND_divide")   ? NODE_MATH_DIVIDE :
+                                                     NODE_MATH_MULTIPLY;
+      ctx.cache_node(usd_shader, node);
+    }
+    out_name = "Value";
+    in1_name = "Value";
+    in2_name = "Value_001";
+  }
+
+  link_nodes(ntree, node, out_name, dest_node, dest_socket_name);
+
+  /* Wire the operands only when the node is first created (it may be shared by several
+   * consumers — e.g. one UV-scale multiply feeding every image node). */
+  if (fresh) {
+    if (pxr::UsdShadeInput a = usd_shader.GetInput(mtlxtokens::in1)) {
+      set_node_input(a, node, in1_name, ntree, column + 1, ctx, extra);
+    }
+    if (pxr::UsdShadeInput b = usd_shader.GetInput(mtlxtokens::in2)) {
+      set_node_input(b, node, in2_name, ntree, column + 1, ctx, extra);
+    }
+  }
+}
+
+void USDMaterialReader::convert_mtlx_mix(const pxr::UsdShadeShader &usd_shader,
+                                         bNode *dest_node,
+                                         const StringRefNull dest_socket_name,
+                                         bNodeTree *ntree,
+                                         const int column,
+                                         NodePlacementContext &ctx,
+                                         const ExtraLinkInfo &extra) const
+{
+  if (!usd_shader || !dest_node || !ntree || dest_socket_name.is_empty()) {
+    return;
+  }
+
+  /* Only scalar mixes are handled (e.g. remapping a packed ORM channel into a roughness
+   * range).  MaterialX mix is lerp(bg, fg, t); a Map Range node in its default Linear mode
+   * computes exactly that with From=[0,1] and To=[bg,fg]. */
+  bNodeSocket *dsock = bke::node_find_socket(*dest_node, SOCK_IN, UString(dest_socket_name));
+  if (!dsock || dsock->type != SOCK_FLOAT) {
+    return;
+  }
+
+  bNode *map_range = ctx.get_cached_node(usd_shader);
+  const bool fresh = (map_range == nullptr);
+  if (fresh) {
+    map_range = add_node(ntree, SH_NODE_MAP_RANGE, ctx.compute_node_loc(column));
+    ctx.cache_node(usd_shader, map_range);
+  }
+
+  link_nodes(ntree, map_range, "Result", dest_node, dest_socket_name);
+
+  if (fresh) {
+    if (bNodeSocket *s = bke::node_find_socket(*map_range, SOCK_IN, "From Min"_ustr)) {
+      s->default_value_typed<bNodeSocketValueFloat>()->value = 0.0f;
+    }
+    if (bNodeSocket *s = bke::node_find_socket(*map_range, SOCK_IN, "From Max"_ustr)) {
+      s->default_value_typed<bNodeSocketValueFloat>()->value = 1.0f;
+    }
+    if (pxr::UsdShadeInput bg = usd_shader.GetInput(mtlxtokens::bg)) {
+      set_node_input(bg, map_range, "To Min", ntree, column + 1, ctx, extra);
+    }
+    if (pxr::UsdShadeInput fg = usd_shader.GetInput(mtlxtokens::fg)) {
+      set_node_input(fg, map_range, "To Max", ntree, column + 1, ctx, extra);
+    }
+    if (pxr::UsdShadeInput mix = usd_shader.GetInput(mtlxtokens::mix)) {
+      set_node_input(mix, map_range, "Value", ntree, column + 1, ctx, extra);
+    }
   }
 }
 

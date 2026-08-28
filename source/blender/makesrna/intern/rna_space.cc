@@ -9793,6 +9793,62 @@ static void rna_def_space_usd_stage(BlenderRNA *brna)
                         "New value to write to the selected attribute");
   RNA_def_property_flag(prop, PROP_TEXTEDIT_UPDATE);
   RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  prop = RNA_def_string(srna,
+                        "edit_attr_prim_path",
+                        nullptr,
+                        1024,
+                        "Edit Prim Path",
+                        "SDF path of the prim owning the attribute being edited");
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  /* ---- Per-component numeric editing fields ---- */
+  /* Row 0 — float[4] (vec4 / mat4 row 0). */
+  prop = RNA_def_property(srna, "edit_attr_row0", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row0");
+  RNA_def_property_array(prop, 4);
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  /* Row 0 — float[3] view (vec3). */
+  prop = RNA_def_property(srna, "edit_attr_row0_3", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row0");
+  RNA_def_property_array(prop, 3);
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  /* Row 0 — float[2] view (vec2). */
+  prop = RNA_def_property(srna, "edit_attr_row0_2", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row0");
+  RNA_def_property_array(prop, 2);
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  /* Row 0 — single float view (scalar). */
+  prop = RNA_def_property(srna, "edit_attr_f0", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row0");
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  /* Rows 1 / 2 / 3 — float[4] (mat4 rows). */
+  prop = RNA_def_property(srna, "edit_attr_row1", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row1");
+  RNA_def_property_array(prop, 4);
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  prop = RNA_def_property(srna, "edit_attr_row2", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row2");
+  RNA_def_property_array(prop, 4);
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
+
+  prop = RNA_def_property(srna, "edit_attr_row3", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "edit_attr_row3");
+  RNA_def_property_array(prop, 4);
+  RNA_def_property_ui_range(prop, -1e8f, 1e8f, 0.01f, 4);
+  RNA_def_property_update(prop, NC_SPACE, nullptr);
 }
 
 void RNA_def_space(BlenderRNA *brna)

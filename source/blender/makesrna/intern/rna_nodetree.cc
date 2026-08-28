@@ -10522,6 +10522,17 @@ static void rna_def_texture_nodetree(BlenderRNA *brna)
   RNA_def_struct_ui_icon(srna, ICON_TEXTURE);
 }
 
+static void rna_def_materialx_nodetree(BlenderRNA *brna)
+{
+  StructRNA *srna;
+
+  srna = RNA_def_struct(brna, "MaterialXNodeTree", "NodeTree");
+  RNA_def_struct_ui_text(
+      srna, "MaterialX Node Tree", "Node tree for authoring MaterialX shading graphs");
+  RNA_def_struct_sdna(srna, "bNodeTree");
+  RNA_def_struct_ui_icon(srna, ICON_MATERIAL);
+}
+
 static void rna_def_geometry_nodetree(BlenderRNA *brna)
 {
   StructRNA *srna;
@@ -10912,6 +10923,13 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("CompositorNode", "CompositorNodeVecBlur");
   define("CompositorNode", "CompositorNodeViewer", def_cmp_viewer);
   define("CompositorNode", "CompositorNodeZcombine");
+
+  define("NodeInternal", "MaterialXNodeSurfaceMaterial");
+  define("NodeInternal", "MaterialXNodeStandardSurface");
+  define("NodeInternal", "MaterialXNodeImage");
+  define("NodeInternal", "MaterialXNodeTexCoord");
+  define("NodeInternal", "MaterialXNodeConstant");
+  define("NodeInternal", "MaterialXNodeMultiply");
 
   define("TextureNode", "TextureNodeAt");
   define("TextureNode", "TextureNodeBricks", def_tex_bricks);
@@ -11312,6 +11330,7 @@ void RNA_def_nodetree(BlenderRNA *brna)
   rna_def_composite_nodetree(brna);
   rna_def_shader_nodetree(brna);
   rna_def_texture_nodetree(brna);
+  rna_def_materialx_nodetree(brna);
   rna_def_geometry_nodetree(brna);
 
   rna_def_nodes(brna);

@@ -4,6 +4,7 @@ set(INC
   ../../blenlib
   ../../blentranslation
   ../../bmesh
+  ../../imbuf
   ../../makesdna
   ../../makesrna
   ../../windowmanager
@@ -11,6 +12,8 @@ set(INC
   ../../depsgraph
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
   ../../io/usd/intern/usd_stage
+  ../../io/usd/intern
+  ../../io/usd
 )
 
 set(INC_SYS
@@ -35,10 +38,13 @@ set(LIB
   PRIVATE bf::bmesh
   PRIVATE bf::dna
   PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::windowmanager
   PRIVATE bf::dependencies::optional::usd
   PRIVATE bf::dependencies::optional::python
+  PRIVATE bf_io_usd
+  PRIVATE bf_editor_interface
 )
 
 if(WITH_USD)

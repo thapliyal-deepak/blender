@@ -23,7 +23,7 @@ void UsdStageListener::unregister_listener()
 void UsdStageListener::on_objects_changed(const pxr::UsdNotice::ObjectsChanged & /*notice*/,
                                           const pxr::UsdStageWeakPtr & /*sender*/)
 {
-  /* TODO: notify editor when stage changes externally. */
+  dirty_.store(true, std::memory_order_relaxed);
 }
 
 }  // namespace blender::io::usd

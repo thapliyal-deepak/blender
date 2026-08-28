@@ -7,14 +7,22 @@
  */
 
 #ifdef WITH_USD
+#  include "DNA_ID.h"
+#  include "DNA_material_types.h"
 #  include "DNA_modifier_types.h"
+#  include "DNA_node_types.h"
+#  include "DNA_object_types.h"
 #  include "DNA_space_types.h"
 
 #  include "BKE_context.hh"
 #  include "BKE_file_handler.hh"
+#  include "BKE_main.hh"
+#  include "BKE_material.hh"
 #  include "BKE_report.hh"
 
+#  include "BLI_listbase.h"
 #  include "BLI_path_utils.hh"
+#  include "BLI_string.hh"
 #  include "BLI_string_utf8.hh"
 
 #  include "BLT_translation.hh"
@@ -1318,6 +1326,178 @@ void WM_OT_usd_import(wmOperatorType *ot)
       "Scale the scene objects by the USD stage's meters per unit value. "
       "This scaling is applied in addition to the value specified in the Scale option");
 }
+
+#  ifdef WITH_MATERIALX
+static bool wm_materialx_export_poll(bContext *C)
+{
+  const Object *ob = CTX_data_active_object(C);
+  return ob != nullptr && ob->totcol > 0;
+}
+
+static wmOperatorStatus wm_materialx_export_invoke(bContext *C,
+                                                   wmOperator *op,
+                                                   const wmEvent * /*event*/)
+{
+  if (RNA_struct_property_is_set(op->ptr, "directory")) {
+    return op->type->exec(C, op);
+  }
+  WM_event_add_fileselect(C, op);
+  return OPERATOR_RUNNING_MODAL;
+}
+
+static wmOperatorStatus wm_materialx_export_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = CTX_data_active_object(C);
+  if (!ob) {
+    BKE_report(op->reports, RPT_ERROR, "No active object");
+    return OPERATOR_CANCELLED;
+  }
+
+  char dir[FILE_MAX];
+  RNA_string_get(op->ptr, "directory", dir);
+  if (dir[0] == '\0') {
+    BKE_report(op->reports, RPT_ERROR, "No output directory selected");
+    return OPERATOR_CANCELLED;
+  }
+
+  Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
+
+  int written = 0;
+  for (int slot = 1; slot <= ob->totcol; slot++) {
+    Material *ma = BKE_object_material_get(ob, short(slot));
+    if (!ma) {
+      continue;
+    }
+
+    char fname[FILE_MAXFILE];
+    SNPRINTF(fname, "%s.mtlx", ma->id.name + 2);
+    /* Keep the filename valid: material names may contain path separators. */
+    for (char *c = fname; *c; c++) {
+      if (*c == '/' || *c == '\\') {
+        *c = '_';
+      }
+    }
+
+    char filepath[FILE_MAX];
+    BLI_path_join(filepath, sizeof(filepath), dir, fname);
+
+    if (io::usd::export_material_to_mtlx_file(depsgraph, ma, filepath)) {
+      written++;
+    }
+    else {
+      BKE_reportf(op->reports, RPT_WARNING, "Failed to export material '%s'", ma->id.name + 2);
+    }
+  }
+
+  if (written == 0) {
+    BKE_report(op->reports, RPT_ERROR, "No materials could be exported");
+    return OPERATOR_CANCELLED;
+  }
+  BKE_reportf(op->reports, RPT_INFO, "Exported %d material(s) to MaterialX", written);
+  return OPERATOR_FINISHED;
+}
+
+void WM_OT_materialx_export(wmOperatorType *ot)
+{
+  ot->name = "Export MaterialX";
+  ot->description =
+      "Export each material on the active object to a standalone MaterialX (.mtlx) file";
+  ot->idname = "WM_OT_materialx_export";
+
+  ot->invoke = wm_materialx_export_invoke;
+  ot->exec = wm_materialx_export_exec;
+  ot->poll = wm_materialx_export_poll;
+
+  ot->flag = OPTYPE_REGISTER;
+
+  WM_operator_properties_filesel(ot,
+                                 0,
+                                 FILE_SPECIAL,
+                                 FILE_SAVE,
+                                 WM_FILESEL_DIRECTORY,
+                                 FILE_DEFAULTDISPLAY,
+                                 FILE_SORT_DEFAULT);
+}
+
+static wmOperatorStatus wm_materialx_tree_export_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const wmEvent * /*event*/)
+{
+  if (RNA_struct_property_is_set(op->ptr, "filepath")) {
+    return op->type->exec(C, op);
+  }
+  WM_event_add_fileselect(C, op);
+  return OPERATOR_RUNNING_MODAL;
+}
+
+static wmOperatorStatus wm_materialx_tree_export_exec(bContext *C, wmOperator *op)
+{
+  char filepath[FILE_MAX];
+  RNA_string_get(op->ptr, "filepath", filepath);
+  if (filepath[0] == '\0') {
+    BKE_report(op->reports, RPT_ERROR, "No output file selected");
+    return OPERATOR_CANCELLED;
+  }
+
+  /* Resolve the node tree: by name if given, else the tree being edited in the node editor. */
+  Main *bmain = CTX_data_main(C);
+  const bNodeTree *ntree = nullptr;
+
+  char group[MAX_ID_NAME - 2];
+  RNA_string_get(op->ptr, "node_group", group);
+  if (group[0] != '\0') {
+    ntree = static_cast<const bNodeTree *>(
+        BLI_findstring(&bmain->nodetrees, group, offsetof(ID, name) + 2));
+  }
+  else if (const SpaceNode *snode = CTX_wm_space_node(C)) {
+    ntree = snode->edittree;
+  }
+
+  if (!ntree) {
+    BKE_report(op->reports, RPT_ERROR, "MaterialX node tree not found");
+    return OPERATOR_CANCELLED;
+  }
+  if (!STREQ(ntree->idname, "MaterialXNodeTree")) {
+    BKE_report(op->reports, RPT_ERROR, "Active node tree is not a MaterialX node tree");
+    return OPERATOR_CANCELLED;
+  }
+
+  if (!io::usd::export_materialx_node_tree(ntree, filepath)) {
+    BKE_report(op->reports, RPT_ERROR, "Failed to export MaterialX node tree");
+    return OPERATOR_CANCELLED;
+  }
+
+  BKE_reportf(op->reports, RPT_INFO, "Exported MaterialX node tree to '%s'", filepath);
+  return OPERATOR_FINISHED;
+}
+
+void WM_OT_materialx_tree_export(wmOperatorType *ot)
+{
+  ot->name = "Export MaterialX Node Tree";
+  ot->description = "Serialize a MaterialX node tree to a standalone MaterialX (.mtlx) file";
+  ot->idname = "WM_OT_materialx_tree_export";
+
+  ot->invoke = wm_materialx_tree_export_invoke;
+  ot->exec = wm_materialx_tree_export_exec;
+
+  ot->flag = OPTYPE_REGISTER;
+
+  RNA_def_string(ot->srna,
+                 "node_group",
+                 nullptr,
+                 MAX_ID_NAME - 2,
+                 "Node Group",
+                 "Name of the MaterialX node tree to export (defaults to the edited tree)");
+
+  WM_operator_properties_filesel(ot,
+                                 0,
+                                 FILE_SPECIAL,
+                                 FILE_SAVE,
+                                 WM_FILESEL_FILEPATH | WM_FILESEL_SHOW_PROPS,
+                                 FILE_DEFAULTDISPLAY,
+                                 FILE_SORT_DEFAULT);
+}
+#  endif /* WITH_MATERIALX */
 
 namespace ed::io {
 void usd_file_handler_add()

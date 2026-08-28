@@ -73,6 +73,8 @@ const char *imb_ext_image[] = {
     ".psd",
     ".pdd",
     ".psb",
+    /* #IMB_FTYPE_RAT */
+    ".rat",
 #ifdef WITH_IMAGE_WEBP
     /* #IMB_FTYPE_WEBP */
     ".webp",

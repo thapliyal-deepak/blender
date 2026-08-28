@@ -143,6 +143,18 @@ struct SpaceUsdStage {
   /** Attribute staged for inline editing in the sidebar (empty = none selected). */
   char edit_attr_name[256] = {};
   char edit_attr_value[512] = {};
+  /** SDF path of the prim owning edit_attr_name (defaults to active_prim_path). */
+  char edit_attr_prim_path[1024] = {};
+
+  /** Per-component float storage for numeric inline editing (up to 4×4 = 16 floats).
+   *  edit_attr_num_components == 0  → text-edit mode (string/token).
+   *  edit_attr_num_components == 1/2/3/4/16 → scalar / vec2 / vec3 / vec4 / mat4. */
+  float edit_attr_row0[4] = {};
+  float edit_attr_row1[4] = {};
+  float edit_attr_row2[4] = {};
+  float edit_attr_row3[4] = {};
+  int edit_attr_num_components = 0;
+  int edit_attr_cols = 0;
 
   /** Runtime data — not saved, not DNA. */
   SpaceUsdStage_Runtime *runtime = nullptr;

@@ -105,6 +105,9 @@ if(WITH_USD)
     PRIVATE bf::dependencies::optional::usd
   )
   add_definitions(-DWITH_USD)
+  if(WITH_MATERIALX)
+    add_definitions(-DWITH_MATERIALX)
+  endif()
 endif()
 
 if(WITH_PUGIXML)

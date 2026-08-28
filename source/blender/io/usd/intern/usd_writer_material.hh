@@ -12,6 +12,7 @@
 namespace blender {
 
 struct bNode;
+struct Depsgraph;
 struct Image;
 struct Material;
 struct ReportList;
@@ -20,6 +21,26 @@ namespace io::usd {
 
 struct USDExporterContext;
 struct USDExportParams;
+
+/**
+ * Author a UsdPreviewSurface network onto an existing Material prim in `stage`, converting the
+ * given Blender `material`'s Principled node tree.  This gives the material an `outputs:surface`
+ * that importers which don't read MaterialX (e.g. Unreal) can consume, without disturbing any
+ * MaterialX/`outputs:mtlx:surface` already composed on the prim.
+ *
+ * When `copy_textures_next_to_stage` is true and the stage has been saved to disk, textures are
+ * copied into a `textures/` directory beside the USD file and referenced with relative paths so
+ * the material survives being moved to another machine; otherwise original absolute paths are used.
+ * Returns false if the stage/material/depsgraph is invalid or the prim can't be resolved.
+ *
+ * `reports` may be null; when given, texture-copy problems are reported to it.
+ */
+bool author_preview_surface_from_blender_material(const pxr::UsdStageRefPtr &stage,
+                                                  const pxr::SdfPath &material_path,
+                                                  Material *material,
+                                                  Depsgraph *depsgraph,
+                                                  bool copy_textures_next_to_stage,
+                                                  ReportList *reports = nullptr);
 
 /**
  * Create USDMaterial from Blender material.

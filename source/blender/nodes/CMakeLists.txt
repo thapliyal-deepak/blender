@@ -42,6 +42,7 @@ endfunction()
 add_subdirectory(composite)
 add_subdirectory(function)
 add_subdirectory(geometry)
+add_subdirectory(materialx_editor)
 add_subdirectory(shader)
 add_subdirectory(texture)
 
@@ -51,6 +52,7 @@ set(INC
   function
   geometry
   intern
+  materialx_editor
   shader
   texture
   function/include
@@ -208,6 +210,7 @@ set(LIB
   bf_nodes_composite
   bf_nodes_function
   bf_nodes_geometry
+  bf_nodes_materialx_editor
   bf_nodes_shader
   bf_nodes_texture
   PRIVATE bf::extern::xxhash

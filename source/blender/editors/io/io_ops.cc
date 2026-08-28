@@ -41,6 +41,10 @@ void ED_operatortypes_io()
 #ifdef WITH_USD
   WM_operatortype_append(WM_OT_usd_import);
   WM_operatortype_append(WM_OT_usd_export);
+#  ifdef WITH_MATERIALX
+  WM_operatortype_append(WM_OT_materialx_export);
+  WM_operatortype_append(WM_OT_materialx_tree_export);
+#  endif
   ed::io::usd_file_handler_add();
 #endif
 

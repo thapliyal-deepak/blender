@@ -213,6 +213,10 @@ class TOPBAR_MT_file(Menu):
 
         layout.separator()
 
+        layout.menu("TOPBAR_MT_usd_stage", text="USD Stage", icon='SCENE_DATA')
+
+        layout.separator()
+
         layout.operator("wm.quit_blender", text="Quit", icon='QUIT')
 
 
@@ -886,6 +890,21 @@ class TOPBAR_PT_grease_pencil_layers(Panel):
         DATA_PT_grease_pencil_layers.draw_settings(layout, grease_pencil)
 
 
+class TOPBAR_MT_usd_stage(Menu):
+    bl_label = "USD Stage"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator_context = 'INVOKE_AREA'
+        layout.operator("usd_stage.open_window", text="Open Stage Editor", icon='SCENE_DATA')
+        layout.separator()
+        layout.operator("usd_stage.open", text="Open USD File...", icon='FILE_FOLDER')
+        layout.operator("usd_stage.save_stage", text="Save Stage", icon='FILE_TICK')
+        layout.operator("usd_stage.save_stage_as", text="Save Stage As...", icon='NONE')
+        layout.separator()
+        layout.operator("usd_stage.export_scene", text="Export Scene to USD Stage", icon='EXPORT')
+
+
 classes = (
     TOPBAR_HT_upper_bar,
     TOPBAR_MT_file_context_menu,
@@ -894,6 +913,7 @@ classes = (
     TOPBAR_MT_blender,
     TOPBAR_MT_blender_system,
     TOPBAR_MT_file,
+    TOPBAR_MT_usd_stage,
     TOPBAR_MT_file_new,
     TOPBAR_MT_file_recover,
     TOPBAR_MT_file_defaults,

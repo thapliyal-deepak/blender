@@ -1,0 +1,15 @@
+#usda 1.0
+
+over "root"
+{
+    over "Cube"
+    {
+        over "Cube"
+        {
+            quatf xformOp:orient = (1, 0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0, 3.8811745643615723, 3.1440823078155518)
+        }
+    }
+}
+

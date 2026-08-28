@@ -30,8 +30,12 @@
 #include "UI_resources.hh"
 #include "UI_tree_view.hh"
 
+#include "RNA_access.hh"
+
 #include "WM_api.hh"
 
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -118,7 +122,9 @@ class UsdPrimItem : public ui::AbstractTreeViewItem {
       if (it != suss_->runtime->obj_map.end() && it->second) {
         ViewLayer *view_layer = CTX_data_view_layer(&C);
         Scene *scene = CTX_data_scene(&C);
-        if (view_layer && scene) {
+        Main *bmain = CTX_data_main(&C);
+        if (view_layer && scene && bmain) {
+          BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
           Base *base = BKE_view_layer_base_find(view_layer, it->second);
           if (base) {
             for (Base *b = static_cast<Base *>(view_layer->object_bases.first);
@@ -151,7 +157,35 @@ class UsdPrimItem : public ui::AbstractTreeViewItem {
     return prim_.GetPath().GetString() == suss_->active_prim_path;
   }
 
+  void build_context_menu(bContext & /*C*/, ui::Layout &column) const override
+  {
+    const std::string path = prim_.GetPath().GetString();
+
+    ui::Layout &row = column.row(false);
+    /* Only prims this stage defines itself can be moved; ones coming from a reference or a
+     * payload live in a layer that is not part of this stage's layer stack. */
+    row.active_set(prim_defined_in_layer_stack());
+    PointerRNA ptr = row.op("USD_STAGE_OT_prim_to_new_layer", "Move to New Layer", ICON_ADD);
+    RNA_string_set(&ptr, "prim_path", path.c_str());
+  }
+
  private:
+  /** True when a layer of the stage's own layer stack authors this prim. */
+  bool prim_defined_in_layer_stack() const
+  {
+    const pxr::UsdStagePtr stage = prim_.GetStage();
+    if (!stage) {
+      return false;
+    }
+    const pxr::SdfPath &path = prim_.GetPath();
+    for (const pxr::SdfLayerHandle &layer : stage->GetLayerStack(false)) {
+      if (layer && layer->GetPrimAtPath(path)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   pxr::UsdPrim prim_;
   SpaceUsdStage *suss_;
 };

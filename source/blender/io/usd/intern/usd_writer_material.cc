@@ -9,6 +9,7 @@
 #include "usd_hook.hh"
 #include "usd_utils.hh"
 
+#include "BKE_idprop.hh"
 #include "BKE_image.hh"
 #include "BKE_image_format.hh"
 #include "BKE_library.hh"
@@ -39,13 +40,22 @@
 #include "WM_types.hh"
 
 #include <pxr/base/tf/stringUtils.h>
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/stage.h>
 
 #ifdef WITH_MATERIALX
 #  include "shader/materialx/material.h"
+#  include <MaterialXCore/Node.h>
+#  include <MaterialXCore/Util.h>
+#  include <MaterialXFormat/File.h>
+#  include <MaterialXFormat/XmlIo.h>
 #  include <pxr/usd/sdf/copyUtils.h>
 #  include <pxr/usd/usdMtlx/materialXConfigAPI.h>
 #  include <pxr/usd/usdMtlx/reader.h>
 #endif
+
+#include "DEG_depsgraph_query.hh"
 
 #include "CLG_log.h"
 
@@ -1435,6 +1445,16 @@ void export_texture(Image *ima,
   }
 }
 
+/* `worker_status` is only set when exporting through the export wmJob; callers that author
+ * materials outside a job (e.g. #author_preview_surface_from_blender_material) may leave it null.
+ * `BKE_report*()` accepts a null report list. */
+static ReportList *reports_of(const USDExporterContext &usd_export_context)
+{
+  return usd_export_context.export_params.worker_status ?
+             usd_export_context.export_params.worker_status->reports :
+             nullptr;
+}
+
 /* Export the given texture node's image to a 'textures' directory in the export path.
  * Based on ImagesExporter::export_UV_Image() */
 static void export_texture(const USDExporterContext &usd_export_context, bNode *node)
@@ -1442,7 +1462,7 @@ static void export_texture(const USDExporterContext &usd_export_context, bNode *
   export_texture(node,
                  usd_export_context.stage,
                  usd_export_context.export_params.overwrite_textures,
-                 usd_export_context.export_params.worker_status->reports);
+                 reports_of(usd_export_context));
 }
 
 #ifdef WITH_MATERIALX
@@ -1451,7 +1471,7 @@ static void export_texture(const USDExporterContext &usd_export_context, Image *
   export_texture(ima,
                  usd_export_context.stage,
                  usd_export_context.export_params.overwrite_textures,
-                 usd_export_context.export_params.worker_status->reports);
+                 reports_of(usd_export_context));
 }
 #endif
 
@@ -1733,6 +1753,23 @@ static void create_usd_materialx_material(const USDExporterContext &usd_export_c
 }
 #endif
 
+/* If the given material is flagged to reference an external MaterialX (.mtlx) document,
+ * return that path; otherwise nullptr.  The flag is a "usd_mtlx_reference" custom string
+ * property set by the "Link External MaterialX" material operator. */
+static const char *material_external_mtlx_path(const Material *material)
+{
+  if (!material || !material->id.properties) {
+    return nullptr;
+  }
+  const IDProperty *prop = IDP_GetPropertyTypeFromGroup(
+      material->id.properties, "usd_mtlx_reference", IDP_STRING);
+  if (!prop) {
+    return nullptr;
+  }
+  const char *path = static_cast<const char *>(prop->data.pointer);
+  return (path && path[0]) ? path : nullptr;
+}
+
 pxr::UsdShadeMaterial create_usd_material(const USDExporterContext &usd_export_context,
                                           pxr::SdfPath usd_path,
                                           const Material *material,
@@ -1741,6 +1778,51 @@ pxr::UsdShadeMaterial create_usd_material(const USDExporterContext &usd_export_c
 {
   pxr::UsdShadeMaterial usd_material = pxr::UsdShadeMaterial::Define(usd_export_context.stage,
                                                                      usd_path);
+
+  /* If the material references an external MaterialX file, compose that .mtlx onto the
+   * Material prim instead of converting Blender nodes.  The referenced document supplies the
+   * shading network (including its "mtlx" surface output); mesh bindings are authored as usual
+   * by the geometry writers.  This mirrors what a hand-authored USD "references = @foo.mtlx@"
+   * would do, without a UsdPreviewSurface/MaterialX-from-nodes conversion. */
+  if (const char *mtlx_path = material_external_mtlx_path(material)) {
+    /* A .mtlx opened as USD usually has no defaultPrim, so a whole-file reference would be
+     * unresolved.  Open it and target the first UsdShadeMaterial prim explicitly; fall back
+     * to a whole-file reference only when a defaultPrim is authored. */
+    pxr::SdfPath ref_prim_path;
+    if (pxr::UsdStageRefPtr mtlx_stage = pxr::UsdStage::Open(mtlx_path)) {
+      if (!mtlx_stage->GetDefaultPrim()) {
+        for (const pxr::UsdPrim &prim : mtlx_stage->Traverse()) {
+          if (prim.IsA<pxr::UsdShadeMaterial>()) {
+            ref_prim_path = prim.GetPath();
+            break;
+          }
+        }
+      }
+    }
+
+    if (ref_prim_path.IsEmpty()) {
+      usd_material.GetPrim().GetReferences().AddReference(pxr::SdfReference(mtlx_path));
+    }
+    else {
+      usd_material.GetPrim().GetReferences().AddReference(
+          pxr::SdfReference(mtlx_path, ref_prim_path));
+    }
+
+    /* Also author a UsdPreviewSurface from the Blender nodes so that importers which do not read
+     * MaterialX (e.g. Unreal) still get a usable surface (`outputs:surface`) alongside the
+     * referenced MaterialX network (`outputs:mtlx:surface`). */
+    if (usd_export_context.export_params.generate_preview_surface) {
+      create_usd_preview_surface_material(
+          usd_export_context, material, usd_material, active_uvmap_name, reports);
+    }
+
+    call_material_export_hooks(usd_export_context.stage,
+                               material,
+                               usd_material,
+                               usd_export_context.export_params,
+                               reports);
+    return usd_material;
+  }
 
   if (usd_export_context.export_params.generate_preview_surface) {
     create_usd_preview_surface_material(
@@ -1762,6 +1844,285 @@ pxr::UsdShadeMaterial create_usd_material(const USDExporterContext &usd_export_c
 
   return usd_material;
 }
+
+bool author_preview_surface_from_blender_material(const pxr::UsdStageRefPtr &stage,
+                                                  const pxr::SdfPath &material_path,
+                                                  Material *material,
+                                                  Depsgraph *depsgraph,
+                                                  bool copy_textures_next_to_stage,
+                                                  ReportList *reports)
+{
+  if (!stage || !material || !depsgraph || material_path.IsEmpty()) {
+    return false;
+  }
+
+  pxr::UsdShadeMaterial usd_material = pxr::UsdShadeMaterial::Get(stage, material_path);
+  if (!usd_material) {
+    usd_material = pxr::UsdShadeMaterial::Define(stage, material_path);
+  }
+  if (!usd_material) {
+    return false;
+  }
+
+  std::string stage_path;
+  if (const pxr::SdfLayerHandle root = stage->GetRootLayer()) {
+    stage_path = root->GetRealPath();
+  }
+
+  /* The material writer reaches reports through `export_params.worker_status` (it normally runs
+   * inside the export wmJob, which always sets it).  There is no job here, so provide a local
+   * status struct — without it `export_texture()` dereferences a null `worker_status`. */
+  wmJobWorkerStatus worker_status = {};
+  worker_status.reports = reports;
+
+  USDExportParams params;
+  params.worker_status = &worker_status;
+  params.generate_preview_surface = true;
+  params.generate_materialx_network = false;
+  params.export_materials = true;
+  if (copy_textures_next_to_stage && !stage_path.empty()) {
+    /* Copy textures into a "textures" directory beside the .usd and author relative paths so the
+     * material survives being moved to another machine. */
+    params.export_textures = true;
+    params.overwrite_textures = true;
+    params.relative_paths = true;
+  }
+  else {
+    /* Reference the textures at their current absolute location (works on this machine). */
+    params.export_textures = false;
+    params.use_original_paths = true;
+    params.relative_paths = false;
+  }
+
+  USDExporterContext ctx{
+      DEG_get_bmain(depsgraph),
+      depsgraph,
+      stage,
+      material_path,
+      []() { return pxr::UsdTimeCode::Default(); },
+      params,
+      stage_path,
+      {},       /* export_image_fn */
+      {},       /* add_skel_mapping_fn */
+      nullptr,  /* hierarchy_iterator */
+  };
+
+  try {
+    create_usd_preview_surface_material(ctx, material, usd_material, "", reports);
+  }
+  catch (const std::exception &) {
+    /* Never let preview-surface authoring take down the caller; the MaterialX reference is
+     * already authored, so the material is still usable. */
+    return false;
+  }
+  return true;
+}
+
+#ifdef WITH_MATERIALX
+
+namespace {
+
+/* Maps a MaterialX-editor node (its bNodeType idname) to the MaterialX node category and the
+ * MaterialX data type of its output.  These are the node types registered by
+ * `bf_nodes_materialx_editor` (see `nodes/materialx_editor/node_materialx_nodes.cc`). */
+struct MtlxNodeSpec {
+  const char *category;
+  const char *type;
+};
+
+static bool mtlx_editor_node_spec(StringRef idname, MtlxNodeSpec &r_spec)
+{
+  if (idname == "MaterialXNodeSurfaceMaterial") {
+    r_spec = {"surfacematerial", "material"};
+  }
+  else if (idname == "MaterialXNodeStandardSurface") {
+    r_spec = {"standard_surface", "surfaceshader"};
+  }
+  else if (idname == "MaterialXNodeImage") {
+    r_spec = {"image", "color3"};
+  }
+  else if (idname == "MaterialXNodeTexCoord") {
+    r_spec = {"texcoord", "vector2"};
+  }
+  else if (idname == "MaterialXNodeConstant") {
+    r_spec = {"constant", "float"};
+  }
+  else if (idname == "MaterialXNodeMultiply") {
+    r_spec = {"multiply", "color3"};
+  }
+  else {
+    return false;
+  }
+  return true;
+}
+
+/* Author the default value of an unconnected input socket onto the MaterialX node.  Only
+ * value-bearing scalar/color/string sockets are written; Vector and Shader inputs are left
+ * unauthored so MaterialX falls back to the node definition default (e.g. a geometric normal). */
+static void mtlx_write_input_value(MaterialX::NodePtr node,
+                                   const std::string &name,
+                                   const bNodeSocket &sock)
+{
+  switch (sock.type) {
+    case SOCK_FLOAT: {
+      const auto *d = static_cast<const bNodeSocketValueFloat *>(sock.default_value);
+      node->setInputValue(name, d->value, "float");
+      break;
+    }
+    case SOCK_RGBA: {
+      const auto *d = static_cast<const bNodeSocketValueRGBA *>(sock.default_value);
+      node->setInputValue(name, MaterialX::Color3(d->value[0], d->value[1], d->value[2]), "color3");
+      break;
+    }
+    case SOCK_STRING: {
+      const auto *d = static_cast<const bNodeSocketValueString *>(sock.default_value);
+      if (d->value[0] != '\0') {
+        node->setInputValue(name, std::string(d->value), "filename");
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+}  // namespace
+
+bool export_materialx_node_tree(const bNodeTree *ntree, const char *filepath)
+{
+  if (!ntree || !filepath || filepath[0] == '\0') {
+    return false;
+  }
+
+  MaterialX::DocumentPtr doc = MaterialX::createDocument();
+
+  /* Pass 1: create a MaterialX node for every recognized editor node. */
+  Map<const bNode *, MaterialX::NodePtr> node_map;
+  Map<const bNode *, MtlxNodeSpec> spec_map;
+  for (const bNode *node = static_cast<const bNode *>(ntree->nodes.first); node != nullptr;
+       node = node->next)
+  {
+    MtlxNodeSpec spec;
+    if (!mtlx_editor_node_spec(node->idname, spec)) {
+      continue;
+    }
+    std::string name = MaterialX::createValidName(node->name);
+    /* Ensure the name is unique within the document. */
+    if (doc->getChild(name)) {
+      const std::string base = name;
+      int i = 1;
+      do {
+        name = base + std::to_string(i++);
+      } while (doc->getChild(name));
+    }
+    node_map.add(node, doc->addNode(spec.category, name, spec.type));
+    spec_map.add(node, spec);
+  }
+
+  if (node_map.is_empty()) {
+    return false;
+  }
+
+  /* Look-up from a target input socket to its upstream source node. */
+  Map<const bNodeSocket *, const bNode *> link_from;
+  for (const bNodeLink *link = static_cast<const bNodeLink *>(ntree->links.first); link != nullptr;
+       link = link->next)
+  {
+    if (link->tosock && link->fromnode) {
+      link_from.add_overwrite(link->tosock, link->fromnode);
+    }
+  }
+
+  /* Pass 2: author input values and connections. */
+  for (const bNode *node = static_cast<const bNode *>(ntree->nodes.first); node != nullptr;
+       node = node->next)
+  {
+    const MaterialX::NodePtr *mx_ptr = node_map.lookup_ptr(node);
+    if (!mx_ptr) {
+      continue;
+    }
+    MaterialX::NodePtr mx = *mx_ptr;
+    for (const bNodeSocket *sock = static_cast<const bNodeSocket *>(node->inputs.first);
+         sock != nullptr;
+         sock = sock->next)
+    {
+      const std::string in_name = sock->identifier;
+      if (const bNode *const *src = link_from.lookup_ptr(sock)) {
+        const MaterialX::NodePtr *src_mx = node_map.lookup_ptr(*src);
+        const MtlxNodeSpec *src_spec = spec_map.lookup_ptr(*src);
+        if (src_mx && src_spec) {
+          /* Author the input with the upstream output's type, then connect it. */
+          mx->addInput(in_name, src_spec->type);
+          mx->setConnectedNode(in_name, *src_mx);
+        }
+        continue;
+      }
+      mtlx_write_input_value(mx, in_name, *sock);
+    }
+  }
+
+  try {
+    MaterialX::writeToXmlFile(doc, MaterialX::FilePath(filepath));
+  }
+  catch (const std::exception &) {
+    return false;
+  }
+  return true;
+}
+
+bool export_material_to_mtlx_file(Depsgraph *depsgraph,
+                                  Material *material,
+                                  const char *filepath)
+{
+  if (!depsgraph || !material || !filepath || filepath[0] == '\0') {
+    return false;
+  }
+
+  Main *bmain = DEG_get_bmain(depsgraph);
+
+  nodes::materialx::ExportParams params;
+  params.output_node_name = material->id.name + 2;
+  /* Write texture "file" inputs as resolved absolute paths so the standalone .mtlx can locate
+   * them independently of the .blend. */
+  params.image_fn = [bmain](Main * /*m*/, Scene * /*s*/, Image *ima, ImageUser * /*iu*/)
+      -> std::string {
+    if (!ima || ima->filepath[0] == '\0') {
+      return "";
+    }
+    char path[FILE_MAX];
+    STRNCPY(path, ima->filepath);
+    BLI_path_abs(path, BKE_main_blendfile_path(bmain));
+    return std::string(path);
+  };
+  /* No scene-mesh context in a standalone export, so leave UV map names empty and let the
+   * converter fall back to the MaterialX default texture coordinates. */
+
+  MaterialX::DocumentPtr doc = nodes::materialx::export_to_materialx(depsgraph, material, params);
+  if (!doc) {
+    return false;
+  }
+
+  try {
+    MaterialX::writeToXmlFile(doc, MaterialX::FilePath(filepath));
+  }
+  catch (const std::exception &) {
+    return false;
+  }
+  return true;
+}
+#else
+bool export_materialx_node_tree(const bNodeTree * /*ntree*/, const char * /*filepath*/)
+{
+  return false;
+}
+
+bool export_material_to_mtlx_file(Depsgraph * /*depsgraph*/,
+                                  Material * /*material*/,
+                                  const char * /*filepath*/)
+{
+  return false;
+}
+#endif
 
 }  // namespace io::usd
 }  // namespace blender

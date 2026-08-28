@@ -348,6 +348,21 @@ ImBuf *imb_load_psd(const unsigned char *mem,
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Format: RAT (#IMB_FTYPE_RAT)
+ * \{ */
+
+extern const char *imb_file_extensions_rat[];
+
+bool imb_is_a_rat(const unsigned char *mem, size_t size);
+
+ImBuf *imb_load_rat(const unsigned char *mem,
+                    size_t size,
+                    int flags,
+                    ImFileColorSpace &r_colorspace);
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Format: AVIF (#IMB_FTYPE_AVIF)
  * \{ */
 

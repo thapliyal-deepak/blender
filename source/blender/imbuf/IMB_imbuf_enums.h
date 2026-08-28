@@ -92,8 +92,9 @@ enum eImbFileType : int8_t {
   IMB_FTYPE_WEBP = 14,
 #endif
   IMB_FTYPE_AVIF = 15,
+  IMB_FTYPE_RAT = 16,
 };
-#define IMB_FTYPE_LAST IMB_FTYPE_AVIF
+#define IMB_FTYPE_LAST IMB_FTYPE_RAT
 
 /** Flags for #ImFileType.capability_read and #ImFileType.capability_write. */
 enum class eImFileTypeCapability : uint8_t {

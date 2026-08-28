@@ -3210,6 +3210,14 @@ class VIEW3D_MT_object_context_menu(Menu):
 
                 layout.separator()
 
+                if obj.type == 'MESH':
+                    layout.operator(
+                        "usd_stage.export_object",
+                        text="Export to USD Stage",
+                        icon='EXPORT',
+                    )
+                    layout.separator()
+
             if obj.type in {'MESH', 'CURVE', 'SURFACE', 'ARMATURE', 'GREASEPENCIL'}:
                 if selected_objects_len > 1:
                     layout.operator("object.join")

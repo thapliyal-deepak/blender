@@ -137,6 +137,15 @@ class USDMaterialReader {
                                   bNodeTree *ntree,
                                   const pxr::UsdShadeShader &usd_shader) const;
 
+  /** Create the Principled BSDF shader node network for a MaterialX standard_surface source. */
+  void import_mtlx_nodes(Material *mtl,
+                         const pxr::UsdShadeMaterial &usd_material,
+                         const pxr::UsdShadeShader &usd_shader) const;
+
+  void set_principled_node_inputs_mtlx(bNode *principled_node,
+                                       bNodeTree *ntree,
+                                       const pxr::UsdShadeShader &usd_shader) const;
+
   bool set_displacement_node_inputs(bNodeTree *ntree,
                                     bNode *output,
                                     const pxr::UsdShadeShader &usd_shader) const;
@@ -170,6 +179,55 @@ class USDMaterialReader {
                               int column,
                               NodePlacementContext &ctx,
                               const ExtraLinkInfo &extra = {}) const;
+
+  /**
+   * Create a Blender Image Texture node for a MaterialX image shader (ND_image_* /
+   * ND_tiledimage_*) and connect its Color output to the given destination socket.
+   */
+  void convert_mtlx_image(const pxr::UsdShadeShader &usd_shader,
+                          bNode *dest_node,
+                          const StringRefNull dest_socket_name,
+                          bNodeTree *ntree,
+                          int column,
+                          NodePlacementContext &ctx,
+                          const ExtraLinkInfo &extra = {}) const;
+
+  /**
+   * Create a Blender Texture Coordinate node for a MaterialX texcoord shader (ND_texcoord_*)
+   * and connect its UV output to the given destination socket.
+   */
+  void convert_mtlx_texcoord(const pxr::UsdShadeShader &usd_shader,
+                             bNode *dest_node,
+                             const StringRefNull dest_socket_name,
+                             bNodeTree *ntree,
+                             int column,
+                             NodePlacementContext &ctx) const;
+
+  /**
+   * Create a Blender Vector Math or Math node for a MaterialX arithmetic shader
+   * (ND_multiply_* / ND_add_* / ND_subtract_* / ND_divide_*), following both operands.
+   * The node kind is chosen from the destination socket type.
+   */
+  void convert_mtlx_binary_op(const pxr::UsdShadeShader &usd_shader,
+                              const pxr::TfToken &shader_id,
+                              bNode *dest_node,
+                              const StringRefNull dest_socket_name,
+                              bNodeTree *ntree,
+                              int column,
+                              NodePlacementContext &ctx,
+                              const ExtraLinkInfo &extra = {}) const;
+
+  /**
+   * Create a Blender Map Range node for a MaterialX mix shader (ND_mix_*) feeding a scalar
+   * socket, remapping the interpolant into the [bg, fg] range (lerp).
+   */
+  void convert_mtlx_mix(const pxr::UsdShadeShader &usd_shader,
+                        bNode *dest_node,
+                        const StringRefNull dest_socket_name,
+                        bNodeTree *ntree,
+                        int column,
+                        NodePlacementContext &ctx,
+                        const ExtraLinkInfo &extra = {}) const;
 
   void convert_usd_transform_2d(const pxr::UsdShadeShader &usd_shader,
                                 bNode *dest_node,

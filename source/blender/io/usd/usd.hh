@@ -13,12 +13,30 @@
 namespace blender {
 
 struct bContext;
+struct bNodeTree;
+struct Material;
 struct Mesh;
 struct Object;
 struct ReportList;
 struct wmJobWorkerStatus;
 
 namespace io::usd {
+
+/**
+ * Serialize a native MaterialX-editor node tree (`MaterialXNodeTree`) to a standalone MaterialX
+ * (.mtlx) document at `filepath`.  Each editor node maps 1:1 to a MaterialX node; socket names
+ * are the MaterialX input/output names.  Returns true on success; returns false (no-op) when
+ * Blender is built without MaterialX or the tree has no recognized nodes.
+ */
+bool export_materialx_node_tree(const bNodeTree *ntree, const char *filepath);
+
+/**
+ * Export a single Blender material to a standalone MaterialX (.mtlx) document at `filepath`,
+ * converting its shader node tree via the built-in MaterialX exporter.  Texture `file` inputs
+ * are written as resolved absolute paths.  Returns true on success; returns false (no-op) when
+ * Blender is built without MaterialX.
+ */
+bool export_material_to_mtlx_file(Depsgraph *depsgraph, Material *material, const char *filepath);
 
 /**
  * Behavior when the name of an imported material
@@ -220,6 +238,11 @@ struct USDImportParams {
   bool import_render;
   bool import_usd_preview;
   bool set_material_blend;
+  /* When true, prefer a MaterialX (mtlx) surface source over a UsdPreviewSurface when both are
+   * present on a material. The USD Stage Editor authors both (UsdPreviewSurface for renderers like
+   * Unreal that do not read MaterialX), but MaterialX is the richer/faithful source, so reopening
+   * a bound stage in Blender should read the MaterialX network rather than the lossy preview. */
+  bool prefer_mtlx_over_preview = false;
 
   bool validate_meshes;
   bool merge_parent_xform;

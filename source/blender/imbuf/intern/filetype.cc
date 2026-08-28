@@ -247,6 +247,23 @@ const ImFileType IMB_FILE_TYPES[] = {
         /*file_extensions*/ imb_file_extensions_psd,
         /*default_save_role*/ COLOR_ROLE_DEFAULT_FLOAT,
     },
+    {
+        /*init*/ nullptr,
+        /*exit*/ nullptr,
+        /*is_a*/ imb_is_a_rat,
+        /*load*/ imb_load_rat,
+        /*load_filepath*/ nullptr,
+        /*load_filepath_thumbnail*/ nullptr,
+        /*save*/ nullptr,
+        /*save_buffer*/ nullptr,
+        /*flag*/ IM_FTYPE_FLOAT,
+        /*capability_read*/ (eImFileTypeCapability::File | eImFileTypeCapability::Memory),
+        /*capability_write*/ eImFileTypeCapability::Zero,
+        /*filetype*/ IMB_FTYPE_RAT,
+        /*filetype_id*/ "RAT",
+        /*file_extensions*/ imb_file_extensions_rat,
+        /*default_save_role*/ COLOR_ROLE_DEFAULT_FLOAT,
+    },
 #ifdef WITH_IMAGE_WEBP
     {
         /*init*/ nullptr,

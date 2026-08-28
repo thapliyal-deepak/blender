@@ -31,6 +31,7 @@ set(SRC
   intern/format_jpeg.cc
   intern/format_png.cc
   intern/format_psd.cc
+  intern/format_rat.cc
   intern/format_svg.cc
   intern/format_targa.cc
   intern/format_tiff.cc

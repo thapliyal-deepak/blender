@@ -22,6 +22,7 @@ void register_node_type_group_output();
 void register_compositor_nodes();
 void register_function_nodes();
 void register_geometry_nodes();
+void register_materialx_nodes();
 void register_shader_nodes();
 void register_texture_nodes();
 

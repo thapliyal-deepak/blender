@@ -180,6 +180,7 @@ void register_nodes()
   register_texture_nodes();
   register_geometry_nodes();
   register_function_nodes();
+  register_materialx_nodes();
 }
 
 }  // namespace blender

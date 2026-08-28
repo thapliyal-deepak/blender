@@ -14,6 +14,10 @@ struct wmOperatorType;
 
 void WM_OT_usd_export(wmOperatorType *ot);
 void WM_OT_usd_import(wmOperatorType *ot);
+#ifdef WITH_MATERIALX
+void WM_OT_materialx_export(wmOperatorType *ot);
+void WM_OT_materialx_tree_export(wmOperatorType *ot);
+#endif
 namespace ed::io {
 void usd_file_handler_add();
 }
