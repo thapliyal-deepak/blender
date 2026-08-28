@@ -203,6 +203,15 @@ void sync_xform_push(blender::Object *ob, pxr::UsdPrim prim)
   if (!found_scale)
     scale_op = xf.AddScaleOp();
 
+  /* When the stage's edit target is a layer that has left the layer stack — a sublayer removed
+   * or muted while it was the target — UsdStage cannot make a prim spec to author into, so every
+   * Add*Op() above failed and handed back an invalid op. Authoring through one of those
+   * dereferences a null smart pointer inside USD, and that is a TfFatal: it aborts the process
+   * rather than logging. Bail out instead; a later push succeeds once the target is valid. */
+  if (!translate_op || !rotate_op || !scale_op) {
+    return;
+  }
+
   if (!found_translate || !found_rotate || !found_scale) {
     /* AddXformOp() appends to xformOpOrder, and the *end* of that array is the most LOCAL op
      * (see UsdGeomXformable's docs: the order is the reverse of matrix-algebra order). A

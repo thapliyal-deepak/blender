@@ -910,6 +910,30 @@ static void USD_STAGE_OT_set_edit_target(wmOperatorType *ot)
 /** \name Toggle Layer Mute operator
  * \{ */
 
+/**
+ * Move the edit target back to the root layer when `layer_id` is the layer being edited.
+ *
+ * A stage's edit target has to be a layer of its layer stack. Taking the target out of that
+ * stack — removing the sublayer, or muting it — leaves the stage unable to make a prim spec to
+ * author into, and the next transform push then walks into a null dereference inside USD, which
+ * aborts the process rather than reporting. Returns true when the target was moved, so the
+ * caller can say so.
+ */
+static bool usd_edit_target_back_to_root(SpaceUsdStage *suss, const std::string &layer_id)
+{
+  const pxr::UsdStageRefPtr &stage = suss->runtime->stage;
+  const pxr::SdfLayerHandle target = stage->GetEditTarget().GetLayer();
+  if (!target || target->GetIdentifier() != layer_id) {
+    return false;
+  }
+  const pxr::SdfLayerHandle root = stage->GetRootLayer();
+  if (!root) {
+    return false;
+  }
+  stage->SetEditTarget(pxr::UsdEditTarget(root));
+  return true;
+}
+
 static wmOperatorStatus usd_toggle_layer_mute_exec(bContext *C, wmOperator *op)
 {
   SpaceUsdStage *suss = usd_stage_from_context(C);
@@ -940,6 +964,9 @@ static wmOperatorStatus usd_toggle_layer_mute_exec(bContext *C, wmOperator *op)
   printf("[USD] toggle_mute: layer='%s' currently_muted=%d muted_count=%d\n",
          layer_str.c_str(), (int)currently_muted, (int)muted.size());
 
+  /* Muting the layer being edited would strand the edit target outside the layer stack. */
+  const bool moved_target = !currently_muted && usd_edit_target_back_to_root(suss, layer_str);
+
   if (!currently_muted) {
     /* MUTING: flush edit-mode mesh edits only. Xform push is intentionally skipped — with the
      * BKE_object_to_mat4 fix, sync_xform_differs now reads ob->loc directly (always current), so
@@ -950,6 +977,12 @@ static wmOperatorStatus usd_toggle_layer_mute_exec(bContext *C, wmOperator *op)
   }
   else {
     suss->runtime->stage->UnmuteLayer(layer_str);
+  }
+
+  if (moved_target) {
+    BKE_report(op->reports,
+               RPT_INFO,
+               "Muted the layer being edited, so the edit target moved to the root layer");
   }
 
   suss->runtime->refresh_layers();
@@ -1651,6 +1684,71 @@ static bool usd_layer_remove_prim_spec(const pxr::SdfLayerHandle &layer, const p
   return parent->RemoveNameChild(spec);
 }
 
+/**
+ * True when a layer of the stage's own layer stack *defines* the prim (specifier `def`), as
+ * opposed to merely carrying `over`s for it. A published asset typically defines nothing
+ * locally: the geometry arrives through a payload or a reference and the root layer holds only
+ * overrides, so moving the local specs out would hand the new layer the transform and nothing
+ * else — a layer that tracks the mesh rather than owning it.
+ */
+static bool usd_prim_defined_in_layer_stack(const pxr::UsdStageRefPtr &stage,
+                                            const pxr::SdfPath &path)
+{
+  for (const pxr::SdfLayerHandle &layer : stage->GetLayerStack(false)) {
+    if (!layer) {
+      continue;
+    }
+    const pxr::SdfPrimSpecHandle spec = layer->GetPrimAtPath(path);
+    if (spec && spec->GetSpecifier() == pxr::SdfSpecifierDef) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Find the file and path where the asset actually defines this prim, so a new layer can
+ * reference it. Walks the prim's composition stack (strongest first, and it spans the layers
+ * pulled in by references and payloads, unlike GetLayerStack) for the first `def` that comes
+ * from outside the local layer stack and lives in a file on disk. Note the path inside that
+ * file need not match the prim's path on the stage — a reference or payload retargets it — so
+ * the spec's own path is what gets recorded.
+ */
+static bool usd_find_external_prim_def(const pxr::UsdPrim &prim,
+                                       const pxr::UsdStageRefPtr &stage,
+                                       std::string *r_layer_path,
+                                       pxr::SdfPath *r_prim_path)
+{
+  std::vector<std::string> local_ids;
+  for (const pxr::SdfLayerHandle &layer : stage->GetLayerStack(false)) {
+    if (layer) {
+      local_ids.push_back(layer->GetIdentifier());
+    }
+  }
+
+  for (const pxr::SdfPrimSpecHandle &spec : prim.GetPrimStack()) {
+    if (!spec || spec->GetSpecifier() != pxr::SdfSpecifierDef) {
+      continue;
+    }
+    const pxr::SdfLayerHandle layer = spec->GetLayer();
+    if (!layer) {
+      continue;
+    }
+    if (std::find(local_ids.begin(), local_ids.end(), layer->GetIdentifier()) != local_ids.end()) {
+      continue;
+    }
+    const std::string real_path = layer->GetRealPath();
+    if (real_path.empty()) {
+      /* Anonymous layer — there is no asset path to reference. */
+      continue;
+    }
+    *r_layer_path = real_path;
+    *r_prim_path = spec->GetPath();
+    return true;
+  }
+  return false;
+}
+
 static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
 {
   SpaceUsdStage *suss = usd_stage_from_context(C);
@@ -1694,12 +1792,21 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
       contributing.push_back(layer);
     }
   }
-  /* A prim can perfectly well have no opinion of its own in the layer stack — anything brought
-   * in by a payload or a reference (which is most of a published asset) is like that. There is
-   * then nothing to move, but the useful half of this operator still applies: make a layer for
-   * the prim, sublayer it and point the edit target at it, so edits to it land somewhere of
-   * their own instead of in the root layer. */
+  /* A prim can perfectly well have nothing of its own in the layer stack — anything brought in
+   * by a payload or a reference (which is most of a published asset) is like that. Then there
+   * may be nothing to move, but the useful half of this operator still applies. */
   const bool has_local_opinions = !contributing.empty();
+
+  /* When the layer stack only *overrides* the prim, moving those specs would give the new layer
+   * the transform and nothing else. Author it as a `def` that references the file where the
+   * asset really defines the prim instead, so the layer owns the prim without duplicating the
+   * geometry, and a version bump of the source is a path edit. */
+  const bool defined_locally = usd_prim_defined_in_layer_stack(stage, path);
+  std::string src_layer_path;
+  pxr::SdfPath src_prim_path;
+  const bool reference_the_source =
+      !defined_locally &&
+      usd_find_external_prim_def(prim, stage, &src_layer_path, &src_prim_path);
 
   /* The new layer is written next to the root layer, so the stage has to live on disk. */
   const std::string root_path = root->GetRealPath();
@@ -1805,6 +1912,31 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
       /* Nothing to move, so just open the prim for editing in the new layer. */
       pxr::SdfJustCreatePrimInLayer(new_layer, path);
     }
+
+    if (!defined_locally) {
+      pxr::SdfPrimSpecHandle spec = new_layer->GetPrimAtPath(path);
+      if (spec) {
+        /* SdfCopySpec brings the `over` specifier across with it, and JustCreatePrimInLayer
+         * makes overs too — promote to a definition and give it the composed type so the layer
+         * stands on its own. */
+        spec->SetSpecifier(pxr::SdfSpecifierDef);
+        if (!prim.GetTypeName().IsEmpty()) {
+          spec->SetTypeName(prim.GetTypeName().GetString());
+        }
+        if (reference_the_source) {
+          /* Keep the asset path relative when the source sits under the stage's directory, so
+           * the layer travels with the asset the way the sublayer entry above does. */
+          std::string asset_path(src_layer_path);
+          std::replace(asset_path.begin(), asset_path.end(), '\\', '/');
+          std::string root_dir_fwd(root_dir);
+          std::replace(root_dir_fwd.begin(), root_dir_fwd.end(), '\\', '/');
+          if (!root_dir_fwd.empty() && asset_path.rfind(root_dir_fwd, 0) == 0) {
+            asset_path = std::string("./") + asset_path.substr(root_dir_fwd.size());
+          }
+          spec->GetReferenceList().Prepend(pxr::SdfReference(asset_path, src_prim_path));
+        }
+      }
+    }
   }
 
   /* Write the prim out straight away so the moved data is never held only in memory. */
@@ -1863,14 +1995,22 @@ static wmOperatorStatus usd_prim_to_new_layer_exec(bContext *C, wmOperator *op)
   suss->runtime->refresh_prim_detail(prim_path);
 
   WM_event_add_notifier(C, NC_SPACE, nullptr);
-  if (has_local_opinions) {
+  if (defined_locally) {
     BKE_reportf(op->reports, RPT_INFO, "Moved '%s' to %s", prim_path, filepath);
+  }
+  else if (reference_the_source) {
+    BKE_reportf(op->reports,
+                RPT_INFO,
+                "%s now defines '%s', referencing %s",
+                filepath,
+                prim_path,
+                src_layer_path.c_str());
   }
   else {
     BKE_reportf(op->reports,
-                RPT_INFO,
-                "'%s' comes from a reference or a payload, so nothing was moved. %s is now the "
-                "edit target for it",
+                RPT_WARNING,
+                "'%s' is only overridden in this stage and its definition could not be traced to "
+                "a file, so %s holds overrides alone",
                 prim_path,
                 filepath);
   }
@@ -2034,6 +2174,13 @@ static wmOperatorStatus usd_remove_sublayer_exec(bContext *C, wmOperator *op)
   if (!found) {
     BKE_reportf(op->reports, RPT_WARNING, "Sublayer not found: %s", layer_id);
     return OPERATOR_CANCELLED;
+  }
+
+  /* Same as muting: the layer is about to leave the layer stack, so it cannot stay the target. */
+  if (usd_edit_target_back_to_root(suss, target_id)) {
+    BKE_report(op->reports,
+               RPT_INFO,
+               "Removed the layer being edited, so the edit target moved to the root layer");
   }
 
   root->SetSubLayerPaths(new_paths);
