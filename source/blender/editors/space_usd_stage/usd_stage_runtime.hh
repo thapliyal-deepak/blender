@@ -64,6 +64,12 @@ struct SpaceUsdStage_Runtime {
   /* Map to track Sdfpath -> Blender Object pointer */
   std::unordered_map<std::string, Object *> obj_map;
 
+  /** USD material prim path -> the name of the Blender material built from it. Without this a
+   *  material bound to twenty meshes is rebuilt twenty times, and editing one copy leaves the
+   *  other nineteen untouched. Keyed by name rather than by pointer so a deleted material cannot
+   *  leave a dangling entry. */
+  std::unordered_map<std::string, std::string> material_map;
+
   /** Skeleton prim path -> the Blender armature object mirroring it. Kept apart from obj_map
    *  because an armature is not a prim proxy the user edits: it is the rig that deforms the
    *  meshes, and it is posed per frame rather than pushed back. */

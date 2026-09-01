@@ -208,6 +208,7 @@ void SpaceUsdStage_Runtime::populate_blender_from_stage(const bContext *C)
   bmain = CTX_data_main(C);
   obj_map.clear();
   skel_map.clear();
+  material_map.clear();
 
   /* Skeletons first: a mesh binds to its armature as it is created, and traversal order gives no
    * guarantee that the Skeleton prim comes before the meshes it deforms. */
@@ -275,12 +276,29 @@ static void ensure_nodes(Main *bmain, Material *mat)
 
 /** Create (or reuse) the Blender material for the USD material bound to a mesh prim and assign
  *  it to slot 1 of the given object. Does nothing if the prim has no material binding. */
-static void assign_bound_material(Main *bmain, Object *ob, const pxr::UsdPrim &prim)
+static void assign_bound_material(Main *bmain,
+                                  Object *ob,
+                                  const pxr::UsdPrim &prim,
+                                  std::unordered_map<std::string, std::string> &material_map)
 {
   pxr::UsdShadeMaterialBindingAPI binding(prim);
   pxr::UsdShadeMaterial bound_mat = binding.ComputeBoundMaterial();
   if (!bound_mat)
     return;
+
+  /* One USD material is one Blender material, however many prims bind it. Reuse the one already
+   * built for this path: a shared look really is shared, so editing it should reach every mesh
+   * that binds it, and rebuilding the node graph per prim is wasted work besides. */
+  const std::string mat_path = bound_mat.GetPath().GetString();
+  auto cached = material_map.find(mat_path);
+  if (cached != material_map.end()) {
+    if (ID *id = BKE_libblock_find_name(bmain, ID_MA, cached->second.c_str())) {
+      BKE_object_material_assign_single_obdata(bmain, ob, reinterpret_cast<Material *>(id), 1);
+      return;
+    }
+    /* Gone (deleted by the user, say) -- fall through and build it again. */
+    material_map.erase(cached);
+  }
 
   io::usd::USDImportParams params{};
   params.import_usd_preview = true;
@@ -302,6 +320,8 @@ static void assign_bound_material(Main *bmain, Object *ob, const pxr::UsdPrim &p
    * UsdPreviewSurface nor MaterialX standard_surface (leaves a bare Principled instead of black).
    * A no-op when the reader already populated the node tree. */
   ensure_nodes(bmain, mat);
+
+  material_map[mat_path] = mat->id.name + 2;
 
   BKE_object_material_assign_single_obdata(bmain, ob, mat, 1);
   /* Tag material for GPU shader recompile and run the full invariant pass so
@@ -336,7 +356,7 @@ void SpaceUsdStage_Runtime::create_blender_mesh_for_prim(const bContext *C, pxr:
 
   io::usd::sync_mesh_pull(prim, me, io::usd::USD_DIRTY_ALL);
   io::usd::sync_xform_pull(prim, ob);
-  assign_bound_material(bmain, ob, prim);
+  assign_bound_material(bmain, ob, prim, material_map);
 
   /* Hand a skinned mesh to its armature: deform groups from the joint weights plus an armature
    * modifier, so Blender deforms it natively and the points stay the undeformed bind geometry. */
@@ -572,7 +592,7 @@ void SpaceUsdStage_Runtime::repull_all_objects(int mesh_dirty_bits)
       Mesh *me = reinterpret_cast<Mesh *>(ob->data);
       io::usd::sync_mesh_pull(prim, me, mesh_bits);
       if (full) {
-        assign_bound_material(bmain, ob, prim);
+        assign_bound_material(bmain, ob, prim, material_map);
       }
       DEG_id_tag_update(&me->id, ID_RECALC_GEOMETRY);
     }
