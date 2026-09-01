@@ -1,4 +1,5 @@
 #include "usd_mesh_sync.hh"
+#include "usd_skin_sync.hh"
 #include "usd_types_sync.hh"
 #include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/metrics.h>
@@ -33,6 +34,9 @@ bool sync_mesh_pull(pxr::UsdPrim prim, Mesh *me, int dirty_bits)
     pxr::VtArray<int> face_vertex_counts;
     pxr::VtArray<int> face_vertex_indices;
 
+    /* Authored points only. A skinned mesh keeps its undeformed geometry here and is deformed by
+     * the armature modifier the runtime binds to it, so evaluating UsdSkel here as well would
+     * deform it twice. */
     usd_mesh.GetPointsAttr().Get(&pts);
     usd_mesh.GetFaceVertexCountsAttr().Get(&face_vertex_counts);
     usd_mesh.GetFaceVertexIndicesAttr().Get(&face_vertex_indices);
@@ -86,6 +90,12 @@ bool sync_mesh_pull(pxr::UsdPrim prim, Mesh *me, int dirty_bits)
         positions[i] = y_up ? float3{pts[i][0], -pts[i][2], pts[i][1]} :
                               float3{pts[i][0], pts[i][1], pts[i][2]};
       }
+      /* Writing positions leaves the caches derived from them — bounds and normals — holding
+       * values for the old shape. ID_RECALC_GEOMETRY alone does not clear them, so an animated
+       * mesh drew correctly while its bounding box stayed frozen at the first frame's, which
+       * throws off view framing, selection and view-frustum culling. Same call the regular USD
+       * mesh reader makes (usd_reader_mesh.cc). */
+      me->tag_positions_changed();
     }
   }
 
@@ -98,6 +108,17 @@ bool sync_mesh_push(Mesh *me, pxr::UsdPrim prim, int dirty_bits)
 {
   pxr::UsdGeomMesh usd_mesh(prim);
   const bool y_up = stage_is_y_up(prim);
+
+  /* The Blender mesh of a skinned prim holds *deformed* points, so writing them back would
+   * overwrite the undeformed geometry the weights are defined against — the rig would be baked
+   * into its own bind pose, and every later frame would deform that. Skinning cannot be inverted
+   * in general either (a point is a weighted blend of several joints), so refuse rather than
+   * guess. Topology is still safe to write: it is not touched by deformation. */
+  if ((dirty_bits & USD_DIRTY_POINTS) && !(dirty_bits & USD_DIRTY_TOPOLOGY) &&
+      skin_is_skinned(prim))
+  {
+    return false;
+  }
 
   if (dirty_bits & USD_DIRTY_TOPOLOGY) {
     /* Full export: write positions + face topology. Used when creating a new prim. */

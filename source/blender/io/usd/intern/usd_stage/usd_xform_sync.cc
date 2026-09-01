@@ -2,6 +2,7 @@
 #include "usd_xform_sync.hh"
 #include <cmath>
 #include "usd_types_sync.hh"
+#include "usd_skin_sync.hh"
 
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
@@ -15,6 +16,7 @@
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdSkel/bindingAPI.h>
 
 namespace blender::io::usd {
 
@@ -52,13 +54,66 @@ static bool stage_is_y_up(const pxr::UsdPrim &prim)
   return stage && pxr::UsdGeomGetStageUpAxis(stage) == pxr::UsdGeomTokens->y;
 }
 
+/**
+ * The authored `primvars:skel:geomBindTransform` of `prim`, if it has one.
+ *
+ * A skinned mesh keeps its points in its own space and carries this matrix to say
+ * where that space sits relative to the skeleton, so the prim's own xformOps say
+ * nothing about where the geometry belongs — usually there are none at all. Read
+ * the points without it and a rig comes in at whatever scale its meshes happened
+ * to be modelled at, stacked on the origin.
+ *
+ * Blender's USD importer resolves this by using the bind transform *as* the
+ * object's local transform (USDMeshReader::get_local_usd_xform), leaving the mesh
+ * data untouched. The stage editor follows the same convention so the two agree
+ * on where a mesh goes.
+ */
+static bool usd_geom_bind_transform(const pxr::UsdPrim &prim, pxr::GfMatrix4d *r_mat)
+{
+  if (!prim || prim.IsInstanceProxy()) {
+    /* Applying the binding API to an instance proxy raises a USD error. */
+    return false;
+  }
+  const pxr::UsdSkelBindingAPI skel_api(prim);
+  if (!skel_api) {
+    return false;
+  }
+  const pxr::UsdAttribute attr = skel_api.GetGeomBindTransformAttr();
+  if (!attr || !attr.HasAuthoredValue()) {
+    return false;
+  }
+  return attr.Get(r_mat);
+}
+
+/**
+ * The world transform the sync layer treats `prim` as having. Pull, push and
+ * sync_xform_differs must all agree on this: if the pull places an object by the
+ * bind transform while differs compares against the prim's xformOps, every
+ * object looks permanently moved and each redraw pushes a bogus transform.
+ */
+static pxr::GfMatrix4d usd_sync_world_transform(const pxr::UsdPrim &prim)
+{
+  pxr::GfMatrix4d bind_xf;
+  if (usd_geom_bind_transform(prim, &bind_xf)) {
+    /* The bind transform stands in for the prim's own local transform, so the
+     * ancestors still have to be composed on top of it. */
+    pxr::GfMatrix4d parent_world(1.0);
+    const pxr::UsdPrim parent = prim.GetParent();
+    if (parent && !parent.IsPseudoRoot()) {
+      parent_world = pxr::UsdGeomImageable(parent).ComputeLocalToWorldTransform(
+          pxr::UsdTimeCode::Default());
+    }
+    return bind_xf * parent_world;
+  }
+  return pxr::UsdGeomImageable(prim).ComputeLocalToWorldTransform(pxr::UsdTimeCode::Default());
+}
+
 void sync_xform_pull(pxr::UsdPrim prim, blender::Object *ob)
 {
   if (!prim || !ob)
     return;
 
-  pxr::UsdGeomImageable img(prim);
-  pxr::GfMatrix4d usd_mat = img.ComputeLocalToWorldTransform(pxr::UsdTimeCode::Default());
+  pxr::GfMatrix4d usd_mat = usd_sync_world_transform(prim);
 
   /* Transpose: USD row-major (row-vector convention) → Blender column-major. */
   float4x4 bl_mat;
@@ -110,6 +165,20 @@ void sync_xform_push(blender::Object *ob, pxr::UsdPrim prim)
     const pxr::GfMatrix4d parent_world =
         pxr::UsdGeomImageable(parent).ComputeLocalToWorldTransform(pxr::UsdTimeCode::Default());
     local_usd = world_usd * parent_world.GetInverse();
+  }
+
+  /* A prim placed by its bind transform has to be moved by writing that transform
+   * back. Its xformOps are not what put the geometry where it is — sync_xform_pull
+   * and sync_xform_differs both read the bind transform for these prims — so
+   * authoring ops here would change nothing on screen and the object would snap
+   * back to its old place on the next pull. */
+  pxr::GfMatrix4d existing_bind;
+  if (usd_geom_bind_transform(prim, &existing_bind)) {
+    pxr::UsdSkelBindingAPI skel_api(prim);
+    if (pxr::UsdAttribute attr = skel_api.CreateGeomBindTransformAttr()) {
+      attr.Set(local_usd);
+    }
+    return;
   }
 
   /* Decompose into translate + orient + scale so that Unreal Live Link xformOps
@@ -246,8 +315,7 @@ bool sync_xform_differs(blender::Object *ob, const pxr::UsdPrim &prim)
   if (!prim || !ob)
     return false;
 
-  pxr::UsdGeomImageable img(prim);
-  pxr::GfMatrix4d usd_mat = img.ComputeLocalToWorldTransform(pxr::UsdTimeCode::Default());
+  pxr::GfMatrix4d usd_mat = usd_sync_world_transform(prim);
 
   float4x4 bl_from_usd;
   for (int i = 0; i < 4; i++)

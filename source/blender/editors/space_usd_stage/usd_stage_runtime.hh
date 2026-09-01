@@ -64,6 +64,11 @@ struct SpaceUsdStage_Runtime {
   /* Map to track Sdfpath -> Blender Object pointer */
   std::unordered_map<std::string, Object *> obj_map;
 
+  /** Skeleton prim path -> the Blender armature object mirroring it. Kept apart from obj_map
+   *  because an armature is not a prim proxy the user edits: it is the rig that deforms the
+   *  meshes, and it is posed per frame rather than pushed back. */
+  std::unordered_map<std::string, Object *> skel_map;
+
   /**
    * Cached Main pointer — set on populate/export so validate_obj_map() can
    * run without a bContext (e.g. from the area listener).
@@ -110,9 +115,17 @@ struct SpaceUsdStage_Runtime {
   void populate_blender_from_stage(const bContext *C);
   void create_blender_mesh_for_prim(const bContext *C, pxr::UsdPrim prim);
   void create_blender_camera_for_prim(const bContext *C, pxr::UsdPrim prim);
+  /** Mirror a UsdSkelSkeleton prim as a Blender armature object. */
+  void create_blender_armature_for_prim(const bContext *C, pxr::UsdPrim prim);
+  /** Pose every mirrored armature for `frame`. Cheap: only pose channels are touched, the
+   *  armature modifiers do the deformation. */
+  void pull_skel_poses(double frame);
   void create_blender_light_for_prim(const bContext *C, pxr::UsdPrim prim);
   /** Re-pull mesh + xform for every tracked object (called after a layer reload). */
-  void repull_all_objects();
+  /** Re-read everything from USD into the Blender objects.
+   *  `mesh_dirty_bits` lets a caller ask for a cheaper update: a frame change only moves points,
+   *  so rebuilding topology and re-resolving materials 24 times a second is pure waste. */
+  void repull_all_objects(int mesh_dirty_bits = -1);
   /** Create Blender objects for prims in the composed stage that are not yet in obj_map.
    *  Used after adding a sublayer so new prims appear without a full repopulate. */
   void resync_new_prims(const bContext *C);

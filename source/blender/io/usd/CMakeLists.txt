@@ -65,6 +65,7 @@ set(INC_SYS
 set(SRC
   intern/usd_stage/usd_authoring_sync.cc
   intern/usd_stage/usd_mesh_sync.cc
+  intern/usd_stage/usd_skin_sync.cc
   intern/usd_stage/usd_xform_sync.cc
   intern/usd_stage/usd_notice_handler.cc
   intern/usd_stage/usd_scene_sync.cc
@@ -127,6 +128,7 @@ set(SRC
   intern/usd_stage/usd_types_sync.hh
   intern/usd_stage/usd_authoring_sync.hh
   intern/usd_stage/usd_mesh_sync.hh
+  intern/usd_stage/usd_skin_sync.hh
   intern/usd_stage/usd_xform_sync.hh
   intern/usd_stage/usd_notice_handler.hh
   intern/usd_stage/usd_scene_sync.hh

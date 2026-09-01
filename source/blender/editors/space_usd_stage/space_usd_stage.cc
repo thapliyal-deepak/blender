@@ -19,6 +19,7 @@
 #include "BLI_string.h"
 #include "BLI_tempfile.h"
 
+#include "BKE_callbacks.hh"
 #include "BKE_context.hh"
 #include "BKE_image.hh"
 #include "BKE_main.hh"
@@ -108,6 +109,8 @@
 #include "usd_reader_material.hh"
 #include "usd_writer_material.hh"
 #include "usd.hh"
+#include "usd_skin_sync.hh"
+#include "usd_types_sync.hh"
 
 #include "DNA_scene_types.h"
 
@@ -307,10 +310,59 @@ static SpaceUsdStage *usd_stage_find_or_open(bContext *C, ScrArea *hint_area, Sc
   return nullptr;
 }
 
+/**
+ * Take the scene's frame range and fps from the stage, when the stage declares them.
+ *
+ * An animated stage is useless to scrub if the timeline does not cover it: Blender's default
+ * 1-250 leaves most of the range empty and, worse, a frame past the last sample shows the
+ * clamped final pose, which reads as "the animation is broken" rather than "the timeline is
+ * pointing somewhere the asset has no samples". Only touched when the stage actually has a
+ * range, so opening a static asset leaves the scene alone.
+ */
+static void usd_stage_adopt_stage_time_range(bContext *C)
+{
+  SpaceUsdStage *suss = usd_stage_from_context(C);
+  if (!suss || !suss->runtime || !suss->runtime->is_open()) {
+    return;
+  }
+  const pxr::UsdStageRefPtr &stage = suss->runtime->stage;
+  if (!stage->HasAuthoredTimeCodeRange()) {
+    return;
+  }
+  Scene *scene = CTX_data_scene(C);
+  if (!scene) {
+    return;
+  }
+  const double start = stage->GetStartTimeCode();
+  const double end = stage->GetEndTimeCode();
+  if (!(end > start)) {
+    return;
+  }
+  scene->r.sfra = int(start);
+  scene->r.efra = int(end);
+  if (scene->r.cfra < scene->r.sfra || scene->r.cfra > scene->r.efra) {
+    scene->r.cfra = scene->r.sfra;
+  }
+  const double fps = stage->GetTimeCodesPerSecond();
+  if (fps > 0.0) {
+    scene->r.frs_sec = int(fps);
+    scene->r.frs_sec_base = float(fps) / float(int(fps));
+  }
+  io::usd::skin_set_eval_time(pxr::UsdTimeCode(double(scene->r.cfra)));
+  DEG_id_tag_update(&scene->id, ID_RECALC_FRAME_CHANGE);
+  WM_main_add_notifier(NC_SCENE | ND_FRAME, scene);
+}
+
 static wmOperatorStatus usd_stage_open_exec(bContext *C, wmOperator *op)
 {
   ScrArea *hint_area = static_cast<ScrArea *>(op->customdata);
   op->customdata = nullptr;
+
+  /* Evaluate skinning at the frame the scene is actually on, so a stage opened on frame 40 does
+   * not come up in its frame-0 pose until the timeline is touched. */
+  if (const Scene *scene = CTX_data_scene(C)) {
+    io::usd::skin_set_eval_time(pxr::UsdTimeCode(double(scene->r.cfra)));
+  }
 
   ScrArea *suss_area = nullptr;
   SpaceUsdStage *suss = usd_stage_find_or_open(C, hint_area, &suss_area);
@@ -337,6 +389,8 @@ static wmOperatorStatus usd_stage_open_exec(bContext *C, wmOperator *op)
   SpaceUsdStage_Runtime *rt = usd_stage_runtime_ensure(suss);
   rt->close();
   rt->open(suss->filepath);
+  /* The stage is loaded now, so its frame range can be adopted. */
+  usd_stage_adopt_stage_time_range(C);
 
   if (rt->is_open()) {
     rt->populate_blender_from_stage(C);
@@ -1594,9 +1648,14 @@ static void usd_stage_area_listener(const wmSpaceTypeListenerParams *params)
       break;
 
     case NC_SCENE:
-      /* Objects may have been added or deleted — validate obj_map to remove
-       * any entries whose Blender object no longer exists and delete their prims. */
-      suss->runtime->validate_obj_map();
+      /* Frame changes are handled by usd_stage_frame_change_cb, not here — playback never posts
+       * a frame notifier at all (screen_ops.cc: "Since we follow draw-flags, we can't send
+       * notifier but tag regions ourselves"), so a listener would only ever catch scrubbing. */
+      if (wmn->data != ND_FRAME) {
+        /* Objects may have been added or deleted — validate obj_map to remove
+         * any entries whose Blender object no longer exists and delete their prims. */
+        suss->runtime->validate_obj_map();
+      }
       ED_area_tag_redraw(area);
       break;
 
@@ -2896,9 +2955,78 @@ static void usd_stage_ui_region_listener(const wmRegionListenerParams *params)
 /** \name Registration
  * \{ */
 
+/**
+ * Re-evaluate every open stage editor for the scene's new frame.
+ *
+ * Hooked to BKE_CB_EVT_FRAME_CHANGE_POST rather than to a notifier because that callback is fired
+ * from BKE_scene_graph_update_for_newframe, which *every* way of changing the frame goes through
+ * — playback, scrubbing, a jump, `frame_set()` from a script. Playback in particular sends no
+ * frame notifier by design, so a space listener sees only the scrubbing case: the animation
+ * appears to work in a workspace where the user drags a dope sheet and to do nothing at all
+ * where they press play.
+ *
+ * Only the armature poses are updated: Blender's armature modifiers deform the meshes from
+ * there, so no geometry is re-read per frame.
+ */
+static void usd_stage_frame_change_cb(Main *bmain,
+                                      PointerRNA **pointers,
+                                      const int pointers_num,
+                                      void * /*arg*/)
+{
+  if (pointers_num < 1 || !pointers[0]) {
+    return;
+  }
+  const ID *id = pointers[0]->owner_id;
+  if (!id || GS(id->name) != ID_SCE) {
+    return;
+  }
+  const Scene *scene = reinterpret_cast<const Scene *>(id);
+
+  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  if (!wm) {
+    return;
+  }
+
+  bool any = false;
+  for (wmWindow &win : wm->windows) {
+    bScreen *screen = WM_window_get_active_screen(&win);
+    if (!screen) {
+      continue;
+    }
+    for (ScrArea &area : screen->areabase) {
+      if (area.spacetype != SPACE_USD_STAGE) {
+        continue;
+      }
+      SpaceUsdStage *suss = static_cast<SpaceUsdStage *>(area.spacedata.first);
+      if (!suss || !suss->runtime || !suss->runtime->is_open()) {
+        continue;
+      }
+      if (!any) {
+        /* Set the time once, before the first stage re-reads anything. */
+        io::usd::skin_set_eval_time(pxr::UsdTimeCode(double(scene->r.cfra)));
+        any = true;
+      }
+      /* Only the rigs need touching: the armature modifiers deform the meshes, so there are no
+       * points to re-read. */
+      suss->runtime->pull_skel_poses(double(scene->r.cfra));
+      ED_area_tag_redraw(&area);
+    }
+  }
+}
+
+static bCallbackFuncStore usd_stage_frame_change_funcstore = {
+    nullptr,
+    nullptr,
+    usd_stage_frame_change_cb,
+    nullptr,
+    0,
+};
+
 void ED_spacetype_usd_stage()
 {
   std::unique_ptr<SpaceType> st = std::make_unique<SpaceType>();
+
+  BKE_callback_add(&usd_stage_frame_change_funcstore, BKE_CB_EVT_FRAME_CHANGE_POST);
 
   st->spaceid = SPACE_USD_STAGE;
   STRNCPY(st->name, "USD Stage");

@@ -4,6 +4,7 @@
 
 #include "usd_stage_runtime.hh"
 #include "usd_mesh_sync.hh"
+#include "usd_skin_sync.hh"
 #include "usd_notice_handler.hh"
 #include "usd_scene_sync.hh"
 #include "usd_types_sync.hh"
@@ -47,6 +48,7 @@
 
 #include "BKE_action.hh"
 #include "BKE_camera.h"
+#include "BKE_armature.hh"
 #include "BKE_collection.hh"
 #include "BKE_light.h"
 #include "BKE_context.hh"
@@ -205,6 +207,15 @@ void SpaceUsdStage_Runtime::populate_blender_from_stage(const bContext *C)
 {
   bmain = CTX_data_main(C);
   obj_map.clear();
+  skel_map.clear();
+
+  /* Skeletons first: a mesh binds to its armature as it is created, and traversal order gives no
+   * guarantee that the Skeleton prim comes before the meshes it deforms. */
+  for (pxr::UsdPrim prim : stage->Traverse()) {
+    if (prim.IsA<pxr::UsdSkelSkeleton>()) {
+      create_blender_armature_for_prim(C, prim);
+    }
+  }
 
   pxr::UsdPrimRange range = stage->Traverse();
   for (pxr::UsdPrim prim : range) {
@@ -218,6 +229,9 @@ void SpaceUsdStage_Runtime::populate_blender_from_stage(const bContext *C)
       create_blender_light_for_prim(C, prim);
     }
   }
+
+  /* Pose the rigs for the frame the editor is showing. */
+  pull_skel_poses(double(io::usd::skin_eval_time().GetValue()));
 
   /* Rebuild the view layer's object_bases_hash so BKE_view_layer_base_find()
    * finds the newly created objects immediately. Without this, prim-tree clicks
@@ -324,7 +338,61 @@ void SpaceUsdStage_Runtime::create_blender_mesh_for_prim(const bContext *C, pxr:
   io::usd::sync_xform_pull(prim, ob);
   assign_bound_material(bmain, ob, prim);
 
+  /* Hand a skinned mesh to its armature: deform groups from the joint weights plus an armature
+   * modifier, so Blender deforms it natively and the points stay the undeformed bind geometry. */
+  if (const pxr::UsdPrim skel_prim = io::usd::skin_skeleton_for_mesh(prim)) {
+    auto it = skel_map.find(skel_prim.GetPath().GetString());
+    if (it != skel_map.end() && it->second) {
+      io::usd::skin_bind_mesh(ob, it->second, prim);
+    }
+  }
+
   DEG_id_tag_update(&ob->id, ID_RECALC_ALL);
+}
+
+void SpaceUsdStage_Runtime::create_blender_armature_for_prim(const bContext *C,
+                                                             pxr::UsdPrim prim)
+{
+  Main *bmain_local = CTX_data_main(C);
+  Scene *scene = CTX_data_scene(C);
+  Collection *sync_col = ensure_usd_sync_collection(bmain_local, scene);
+
+  bArmature *arm = BKE_armature_add(bmain_local, prim.GetName().GetText());
+  Object *ob = BKE_object_add_only_object(bmain_local, OB_ARMATURE, prim.GetName().GetText());
+  ob->data = reinterpret_cast<ID *>(arm);
+  id_us_plus(&arm->id);
+
+  BKE_collection_object_add(bmain_local, sync_col, ob);
+
+  if (!io::usd::skin_build_armature(bmain_local, ob, prim)) {
+    /* Nothing usable in the skeleton — most often joint names SdfPath cannot parse. Drop the
+     * empty armature rather than leave a stray object in the scene. */
+    BKE_collection_object_remove(bmain_local, sync_col, ob, true);
+    return;
+  }
+
+  skel_map[prim.GetPath().GetString()] = ob;
+  io::usd::skin_place_armature(ob, prim);
+  DEG_id_tag_update(&ob->id, ID_RECALC_ALL);
+}
+
+void SpaceUsdStage_Runtime::pull_skel_poses(const double frame)
+{
+  if (!stage) {
+    return;
+  }
+  for (auto &[path, arm_ob] : skel_map) {
+    if (!arm_ob) {
+      continue;
+    }
+    const pxr::UsdPrim prim = stage->GetPrimAtPath(pxr::SdfPath(path));
+    if (!prim) {
+      continue;
+    }
+    if (io::usd::skin_pull_pose(arm_ob, prim, pxr::UsdTimeCode(frame))) {
+      DEG_id_tag_update(&arm_ob->id, ID_RECALC_GEOMETRY);
+    }
+  }
 }
 
 void SpaceUsdStage_Runtime::create_blender_camera_for_prim(const bContext *C, pxr::UsdPrim prim)
@@ -470,10 +538,12 @@ void SpaceUsdStage_Runtime::resync_new_prims(const bContext *C)
   DEG_relations_tag_update(CTX_data_main(const_cast<bContext *>(C)));
 }
 
-void SpaceUsdStage_Runtime::repull_all_objects()
+void SpaceUsdStage_Runtime::repull_all_objects(int mesh_dirty_bits)
 {
   if (!stage)
     return;
+  const bool full = (mesh_dirty_bits < 0);
+  const int mesh_bits = full ? io::usd::USD_DIRTY_ALL : mesh_dirty_bits;
   for (auto &[path, ob] : obj_map) {
     if (!ob)
       continue;
@@ -500,8 +570,10 @@ void SpaceUsdStage_Runtime::repull_all_objects()
 
     if (ob->type == OB_MESH) {
       Mesh *me = reinterpret_cast<Mesh *>(ob->data);
-      io::usd::sync_mesh_pull(prim, me, io::usd::USD_DIRTY_ALL);
-      assign_bound_material(bmain, ob, prim);
+      io::usd::sync_mesh_pull(prim, me, mesh_bits);
+      if (full) {
+        assign_bound_material(bmain, ob, prim);
+      }
       DEG_id_tag_update(&me->id, ID_RECALC_GEOMETRY);
     }
     else if (ob->type == OB_CAMERA) {
