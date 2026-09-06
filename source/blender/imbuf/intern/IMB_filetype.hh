@@ -357,7 +357,7 @@ bool imb_is_a_rat(const unsigned char *mem, size_t size);
 
 ImBuf *imb_load_rat(const unsigned char *mem,
                     size_t size,
-                    int flags,
+                    ImBufFlags flags,
                     ImFileColorSpace &r_colorspace);
 
 /** \} */

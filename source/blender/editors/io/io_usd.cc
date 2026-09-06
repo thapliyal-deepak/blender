@@ -20,7 +20,7 @@
 #  include "BKE_material.hh"
 #  include "BKE_report.hh"
 
-#  include "BLI_listbase.h"
+#  include "BLI_listbase.hh"
 #  include "BLI_path_utils.hh"
 #  include "BLI_string.hh"
 #  include "BLI_string_utf8.hh"

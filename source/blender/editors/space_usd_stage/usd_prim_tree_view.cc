@@ -11,9 +11,9 @@
 #include "DEG_depsgraph.hh"
 #include "ED_screen.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-#include "BLI_string_utf8.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
+#include "BLI_string_utf8.hh"
 
 #include "BLT_translation.hh"
 
@@ -127,7 +127,7 @@ class UsdPrimItem : public ui::AbstractTreeViewItem {
           BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
           Base *base = BKE_view_layer_base_find(view_layer, it->second);
           if (base) {
-            for (Base *b = static_cast<Base *>(view_layer->object_bases.first);
+            for (Base *b = view_layer->object_bases.first_as<Base>();
                  b != nullptr;
                  b = b->next)
             {

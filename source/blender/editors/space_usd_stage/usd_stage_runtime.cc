@@ -66,8 +66,8 @@
 #include "BLI_ustring.hh"
 
 #include "usd_reader_material.hh"
-#include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_listbase.hh"
+#include "BLI_string.hh"
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
 #include "BKE_node_legacy_types.hh"
@@ -253,7 +253,7 @@ static void ensure_nodes(Main *bmain, Material *mat)
   if (!mat || !mat->nodetree)
     return;
   mat->use_nodes = true;
-  for (bNode *n = static_cast<bNode *>(mat->nodetree->nodes.first); n;
+  for (bNode *n = mat->nodetree->nodes.first_as<bNode>(); n;
        n = static_cast<bNode *>(n->next))
   {
     if (n->type_legacy == SH_NODE_OUTPUT_MATERIAL)
@@ -978,7 +978,7 @@ static void apply_to_principled_socket(bNode *node,
                                        const char *socket_name,
                                        const pxr::VtValue &val)
 {
-  for (bNodeSocket *sock = static_cast<bNodeSocket *>(node->inputs.first); sock;
+  for (bNodeSocket *sock = node->inputs.first_as<bNodeSocket>(); sock;
        sock = static_cast<bNodeSocket *>(sock->next))
   {
     if (!STREQ(sock->name, socket_name))
@@ -1120,7 +1120,7 @@ void SpaceUsdStage_Runtime::sync_active_material_to_blender(const char *sdf_path
 
   /* Find the Principled BSDF node. */
   bNode *principled = nullptr;
-  for (bNode *n = static_cast<bNode *>(mat->nodetree->nodes.first); n;
+  for (bNode *n = mat->nodetree->nodes.first_as<bNode>(); n;
        n = static_cast<bNode *>(n->next))
   {
     if (n->type_legacy == SH_NODE_BSDF_PRINCIPLED) {
@@ -1190,7 +1190,7 @@ void apply_usd_material_inputs_to_material(pxr::UsdStageRefPtr stage,
     return;
 
   bNode *principled = nullptr;
-  for (bNode *n = static_cast<bNode *>(bl_mat->nodetree->nodes.first); n;
+  for (bNode *n = bl_mat->nodetree->nodes.first_as<bNode>(); n;
        n = static_cast<bNode *>(n->next))
   {
     if (n->type_legacy == SH_NODE_BSDF_PRINCIPLED) {
@@ -1253,7 +1253,7 @@ void SpaceUsdStage_Runtime::push_all_materials()
   std::set<std::string> pushed;
 
   auto push_shader = [](bNode *principled, const pxr::UsdShadeShader &shader, bool is_mtlx) {
-    for (bNodeSocket *sock = static_cast<bNodeSocket *>(principled->inputs.first); sock;
+    for (bNodeSocket *sock = principled->inputs.first_as<bNodeSocket>(); sock;
          sock = static_cast<bNodeSocket *>(sock->next))
     {
       const char *usd_name = principled_socket_to_usd_input(sock->name, is_mtlx);
@@ -1294,7 +1294,7 @@ void SpaceUsdStage_Runtime::push_all_materials()
       continue;
 
     bNode *principled = nullptr;
-    for (bNode *n = static_cast<bNode *>(mat->nodetree->nodes.first); n;
+    for (bNode *n = mat->nodetree->nodes.first_as<bNode>(); n;
          n = static_cast<bNode *>(n->next))
     {
       if (n->type_legacy == SH_NODE_BSDF_PRINCIPLED) {

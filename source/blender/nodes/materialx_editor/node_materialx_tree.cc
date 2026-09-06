@@ -14,9 +14,9 @@
 
 #include "DNA_node_types.h"
 
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_ustring.hh"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 
 #include "BKE_node.hh"
 

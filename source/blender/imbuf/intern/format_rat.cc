@@ -82,10 +82,10 @@
 
 #include "BLI_array.hh"
 #include "BLI_math_half.hh"
-#include "BLI_string.h"
+#include "BLI_string.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_string_utf8.h"
-#include "BLI_utildefines.h"
+#include "BLI_string_utf8.hh"
+#include "BLI_utildefines.hh"
 #include "BLI_vector.hh"
 
 #include "CLG_log.h"
@@ -528,8 +528,8 @@ bool rat_read_tiles(const RatFile &rat, const RatRecord &record, ImBuf *ibuf)
 
   Array<uchar> tile_data(size_t(tile_width) * tile_height * channels * type_size);
 
-  uchar *byte_buffer = ibuf->byte_buffer.data;
-  float *float_buffer = ibuf->float_buffer.data;
+  uchar *byte_buffer = ibuf->byte_data_for_write();
+  float *float_buffer = ibuf->float_data_for_write();
 
   for (int tile = 0; tile < tile_num; tile++) {
     const int x = (tile % tiles_x) * tile_width;
@@ -760,7 +760,10 @@ bool imb_is_a_rat(const uchar *mem, const size_t size)
   return size >= RAT_HEADER_SIZE && memcmp(mem, "fbtH", 4) == 0;
 }
 
-ImBuf *imb_load_rat(const uchar *mem, const size_t size, int flags, ImFileColorSpace &r_colorspace)
+ImBuf *imb_load_rat(const uchar *mem,
+                    const size_t size,
+                    ImBufFlags flags,
+                    ImFileColorSpace &r_colorspace)
 {
   if (!imb_is_a_rat(mem, size)) {
     return nullptr;
@@ -781,28 +784,31 @@ ImBuf *imb_load_rat(const uchar *mem, const size_t size, int flags, ImFileColorS
   }
 
   const int channels_used = std::min(int(record->channels), 4);
-  /* Blender reserves all 32 planes for images that carry their own alpha. */
-  const int planes = (channels_used == 4) ? 32 : 8 * channels_used;
   const bool is_float = record->data_type != RAT_TYPE_UINT8;
 
-  /* Report the color space before the #IB_test early out below: an image is probed with
-   * #IB_test first and keeps whatever that pass reports. Half and float pixels can hold values
-   * outside 0..1, integer pixels never do. */
+  /* Report the color space before the #ImBufFlags::Test early out below: an image is probed
+   * with #ImBufFlags::Test first and keeps whatever that pass reports. Half and float pixels
+   * can hold values outside 0..1, integer pixels never do. */
   r_colorspace.is_hdr_float = ELEM(record->data_type, RAT_TYPE_HALF, RAT_TYPE_FLOAT);
   rat_read_colorspace(rat, record->index, r_colorspace);
 
-  if (flags & IB_test) {
-    ImBuf *ibuf = IMB_allocImBuf(record->xres, record->yres, planes, 0);
+  if (flag_is_set(flags, ImBufFlags::Test)) {
+    ImBuf *ibuf = IMB_allocImBuf(record->xres, record->yres, ImBufFlags::Zero);
     if (ibuf) {
       ibuf->ftype = IMB_FTYPE_RAT;
+      ibuf->channels = channels_used;
     }
     return ibuf;
   }
 
-  const uint buffer_flags = (is_float ? IB_float_data : IB_byte_data) | IB_uninitialized_pixels;
-  ImBuf *ibuf = IMB_allocImBuf(record->xres, record->yres, planes, buffer_flags);
+  const ImBufFlags buffer_flags = (is_float ? ImBufFlags::FloatData : ImBufFlags::ByteData) |
+                                   ImBufFlags::UninitializedPixels;
+  ImBuf *ibuf = IMB_allocImBuf(record->xres, record->yres, buffer_flags);
   if (ibuf == nullptr) {
     return nullptr;
+  }
+  if (is_float) {
+    ibuf->channels = channels_used;
   }
 
   if (!rat_read_tiles(rat, *record, ibuf)) {
@@ -815,7 +821,7 @@ ImBuf *imb_load_rat(const uchar *mem, const size_t size, int flags, ImFileColorS
     ibuf->foptions.flag |= OPENEXR_HALF;
   }
 
-  if (is_float && (flags & IB_byte_data)) {
+  if (is_float && flag_is_set(flags, ImBufFlags::ByteData)) {
     IMB_byte_from_float(ibuf);
   }
 

@@ -49,8 +49,7 @@ static const pxr::UsdStageRefPtr *find_active_stage(const TreeSourceData &source
   if (!source_data.workspace) {
     return nullptr;
   }
-  for (WorkSpaceLayout *layout = static_cast<WorkSpaceLayout *>(
-           source_data.workspace->layouts.first);
+  for (WorkSpaceLayout *layout = source_data.workspace->layouts.first_as<WorkSpaceLayout>();
        layout;
        layout = static_cast<WorkSpaceLayout *>(layout->next))
   {
@@ -58,7 +57,7 @@ static const pxr::UsdStageRefPtr *find_active_stage(const TreeSourceData &source
     if (!screen) {
       continue;
     }
-    for (ScrArea *area = static_cast<ScrArea *>(screen->areabase.first); area;
+    for (ScrArea *area = screen->areabase.first_as<ScrArea>(); area;
          area = static_cast<ScrArea *>(area->next))
     {
       for (SpaceLink &sl : area->spacedata) {

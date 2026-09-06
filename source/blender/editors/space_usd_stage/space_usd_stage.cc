@@ -13,11 +13,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_fileops.h"
-#include "BLI_listbase.h"
+#include "BLI_fileops.hh"
+#include "BLI_listbase.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_string.h"
-#include "BLI_tempfile.h"
+#include "BLI_string.hh"
+#include "BLI_tempfile.hh"
 
 #include "BKE_callbacks.hh"
 #include "BKE_context.hh"
@@ -183,7 +183,7 @@ static void usd_stage_free(SpaceLink *sl)
 
 static void usd_stage_init(wmWindowManager * /*wm*/, ScrArea *area)
 {
-  SpaceUsdStage *suss = reinterpret_cast<SpaceUsdStage *>(area->spacedata.first);
+  SpaceUsdStage *suss = area->spacedata.first_as<SpaceUsdStage>();
   SpaceUsdStage_Runtime *rt = usd_stage_runtime_ensure(suss);
 
   if (rt->is_open())
@@ -205,7 +205,7 @@ static void usd_stage_init(wmWindowManager * /*wm*/, ScrArea *area)
 
   /* Tag every region so the prim tree draws /World immediately on first open
    * rather than briefly flashing "No stage open". */
-  for (ARegion *region = static_cast<ARegion *>(area->regionbase.first); region;
+  for (ARegion *region = area->regionbase.first_as<ARegion>(); region;
        region = static_cast<ARegion *>(region->next))
   {
     ED_region_tag_redraw(region);
@@ -238,16 +238,16 @@ static SpaceUsdStage *usd_stage_find_open(bContext *C)
   wmWindowManager *wm = CTX_wm_manager(C);
   if (!wm)
     return nullptr;
-  for (wmWindow *win = static_cast<wmWindow *>(wm->windows.first); win;
+  for (wmWindow *win = wm->windows.first_as<wmWindow>(); win;
        win = static_cast<wmWindow *>(win->next))
   {
     bScreen *screen = WM_window_get_active_screen(win);
     if (!screen)
       continue;
-    for (ScrArea *area = static_cast<ScrArea *>(screen->areabase.first); area;
+    for (ScrArea *area = screen->areabase.first_as<ScrArea>(); area;
          area = static_cast<ScrArea *>(area->next))
     {
-      SpaceLink *sl = static_cast<SpaceLink *>(area->spacedata.first);
+      SpaceLink *sl = area->spacedata.first_as<SpaceLink>();
       if (sl && sl->spacetype == SPACE_USD_STAGE) {
         SpaceUsdStage *suss = reinterpret_cast<SpaceUsdStage *>(sl);
         if (suss->runtime && suss->runtime->is_open())
@@ -293,7 +293,7 @@ static SpaceUsdStage *usd_stage_find_or_open(bContext *C, ScrArea *hint_area, Sc
   /* 2. Search every area on the current screen. */
   bScreen *screen = CTX_wm_screen(C);
   if (screen) {
-    for (ScrArea *area = static_cast<ScrArea *>(screen->areabase.first); area;
+    for (ScrArea *area = screen->areabase.first_as<ScrArea>(); area;
          area = static_cast<ScrArea *>(area->next))
     {
       for (SpaceLink &sl : area->spacedata) {
@@ -379,7 +379,7 @@ static wmOperatorStatus usd_stage_open_exec(bContext *C, wmOperator *op)
     if (!suss_area) {
       return OPERATOR_CANCELLED;
     }
-    suss = reinterpret_cast<SpaceUsdStage *>(suss_area->spacedata.first);
+    suss = suss_area->spacedata.first_as<SpaceUsdStage>();
   }
 
   char filepath[FILE_MAX];
@@ -1206,7 +1206,7 @@ static bool ensure_material_shader_nodes(Main *bmain, Material *mat)
     return false;
   mat->use_nodes = true;
   /* Robust check: walk for an existing Material Output rather than relying on nodes.first. */
-  for (bNode *n = static_cast<bNode *>(mat->nodetree->nodes.first); n;
+  for (bNode *n = mat->nodetree->nodes.first_as<bNode>(); n;
        n = static_cast<bNode *>(n->next))
   {
     if (n->type_legacy == SH_NODE_OUTPUT_MATERIAL)
@@ -1604,7 +1604,7 @@ static void usd_stage_area_listener(const wmSpaceTypeListenerParams *params)
   ScrArea *area = params->area;
   const wmNotifier *wmn = params->notifier;
 
-  SpaceUsdStage *suss = reinterpret_cast<SpaceUsdStage *>(area->spacedata.first);
+  SpaceUsdStage *suss = area->spacedata.first_as<SpaceUsdStage>();
   if (!suss || !suss->runtime || !suss->runtime->is_open())
     return;
 
@@ -2794,7 +2794,7 @@ static wmOperatorStatus usd_open_window_exec(bContext *C, wmOperator * /*op*/)
   /* Re-use any existing Stage Editor area on the current screen first. */
   bScreen *screen = CTX_wm_screen(C);
   if (screen) {
-    for (ScrArea *area = static_cast<ScrArea *>(screen->areabase.first); area;
+    for (ScrArea *area = screen->areabase.first_as<ScrArea>(); area;
          area = static_cast<ScrArea *>(area->next))
     {
       if (area->spacetype == SPACE_USD_STAGE) {
@@ -2982,7 +2982,7 @@ static void usd_stage_frame_change_cb(Main *bmain,
   }
   const Scene *scene = reinterpret_cast<const Scene *>(id);
 
-  wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+  wmWindowManager *wm = bmain->wm.first_as<wmWindowManager>();
   if (!wm) {
     return;
   }
@@ -2997,7 +2997,7 @@ static void usd_stage_frame_change_cb(Main *bmain,
       if (area.spacetype != SPACE_USD_STAGE) {
         continue;
       }
-      SpaceUsdStage *suss = static_cast<SpaceUsdStage *>(area.spacedata.first);
+      SpaceUsdStage *suss = area.spacedata.first_as<SpaceUsdStage>();
       if (!suss || !suss->runtime || !suss->runtime->is_open()) {
         continue;
       }

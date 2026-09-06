@@ -1,11 +1,11 @@
 /* source/blender/io/usd/intern/usd_stage/usd_authoring_sync.cc */
 
 #include "usd_authoring_sync.hh"
-#include "usd_types_sync.hh  "
+#include "usd_types_sync.hh"
 
 /* 1. Blender Hybrid/C++ headers (Must be OUTSIDE extern "C") */
 /* These headers handle their own C/C++ linkage internally. */
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.hh"
 #include "MEM_guardedalloc.h"
 
 /* 2. Standard C++ and Pixar USD headers (Never in extern "C") */

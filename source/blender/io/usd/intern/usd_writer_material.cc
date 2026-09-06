@@ -1999,7 +1999,7 @@ bool export_materialx_node_tree(const bNodeTree *ntree, const char *filepath)
   /* Pass 1: create a MaterialX node for every recognized editor node. */
   Map<const bNode *, MaterialX::NodePtr> node_map;
   Map<const bNode *, MtlxNodeSpec> spec_map;
-  for (const bNode *node = static_cast<const bNode *>(ntree->nodes.first); node != nullptr;
+  for (const bNode *node = ntree->nodes.first_as<const bNode>(); node != nullptr;
        node = node->next)
   {
     MtlxNodeSpec spec;
@@ -2025,7 +2025,7 @@ bool export_materialx_node_tree(const bNodeTree *ntree, const char *filepath)
 
   /* Look-up from a target input socket to its upstream source node. */
   Map<const bNodeSocket *, const bNode *> link_from;
-  for (const bNodeLink *link = static_cast<const bNodeLink *>(ntree->links.first); link != nullptr;
+  for (const bNodeLink *link = ntree->links.first_as<const bNodeLink>(); link != nullptr;
        link = link->next)
   {
     if (link->tosock && link->fromnode) {
@@ -2034,7 +2034,7 @@ bool export_materialx_node_tree(const bNodeTree *ntree, const char *filepath)
   }
 
   /* Pass 2: author input values and connections. */
-  for (const bNode *node = static_cast<const bNode *>(ntree->nodes.first); node != nullptr;
+  for (const bNode *node = ntree->nodes.first_as<const bNode>(); node != nullptr;
        node = node->next)
   {
     const MaterialX::NodePtr *mx_ptr = node_map.lookup_ptr(node);
@@ -2042,7 +2042,7 @@ bool export_materialx_node_tree(const bNodeTree *ntree, const char *filepath)
       continue;
     }
     MaterialX::NodePtr mx = *mx_ptr;
-    for (const bNodeSocket *sock = static_cast<const bNodeSocket *>(node->inputs.first);
+    for (const bNodeSocket *sock = node->inputs.first_as<const bNodeSocket>();
          sock != nullptr;
          sock = sock->next)
     {
